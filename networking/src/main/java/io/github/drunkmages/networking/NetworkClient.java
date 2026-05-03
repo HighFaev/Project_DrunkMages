@@ -7,11 +7,7 @@ import io.github.drunkmages.common.PlayerInfo;
 import io.github.drunkmages.common.RosterUpdate;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.EventLoopGroup;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 
@@ -34,6 +30,9 @@ public final class NetworkClient {
         /** Called when the channel closes for any reason. */
         void onDisconnected();
     }
+
+    private volatile Channel channel;
+    private volatile EventLoopGroup   group;
 
     public static void connect(String host, int port, String nickname, Listener listener) throws Exception {
         Handshake handshake = new Handshake(nickname);
@@ -87,6 +86,10 @@ public final class NetworkClient {
         }
     }
 
-    private NetworkClient() {
+    public void disconnect() {
+        Channel ch = channel;
+        if (ch != null) ch.close();
+        EventLoopGroup g = group;
+        if (g != null) g.shutdownGracefully();
     }
 }

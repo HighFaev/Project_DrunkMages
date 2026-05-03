@@ -81,7 +81,7 @@ public final class NetworkServer {
 
         ByteBuf buf = Unpooled.buffer(bufSize);
         buf.writeByte(0x02);
-        buf.writeByte(snapshot.size());
+        buf.writeInt(snapshot.size());
         for (int i = 0; i < snapshot.size(); i++) {
             buf.writeInt(snapshot.get(i).id());
             buf.writeShort(names.get(i).length);

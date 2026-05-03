@@ -31,6 +31,8 @@ public final class App {
         AtomicReference<List<PlayerInfo>> roster = new AtomicReference<>(List.of());
         AtomicReference<String> status = new AtomicReference<>("Connecting…");
 
+        NetworkClient client = new NetworkClient();
+
         Thread netThread = new Thread(() -> {
             try {
                 NetworkClient.connect(host, port, nick, new NetworkClient.Listener() {
@@ -65,8 +67,10 @@ public final class App {
         cfg.setForegroundFPS(60);
 
         new Lwjgl3Application(new LobbyGame(myId, roster, status), cfg);
-
+        client.disconnect();
     }
+
+
 
     private App() {
     }

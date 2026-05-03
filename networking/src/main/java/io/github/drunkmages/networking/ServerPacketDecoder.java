@@ -51,7 +51,7 @@ final class ServerPacketDecoder extends ByteToMessageDecoder {
                 List<PlayerInfo> players = new ArrayList<>(count);
 
                 for (int i = 0; i < count; i++) {
-                    if (in.readableBytes() < 4) {
+                    if (in.readableBytes() < 6) {
                         in.resetReaderIndex();
                         return;
                     }
