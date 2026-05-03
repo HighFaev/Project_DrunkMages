@@ -19,6 +19,7 @@
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.compiler.release>17</maven.compiler.release>
+    <gdx.version>1.12.1</gdx.version>
   </properties>
 
   <dependencyManagement>
@@ -36,6 +37,22 @@
         <version>4.2.12.Final</version>
         <type>pom</type>
         <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>com.badlogicgames.gdx</groupId>
+        <artifactId>gdx</artifactId>
+        <version>${gdx.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.badlogicgames.gdx</groupId>
+        <artifactId>gdx-backend-lwjgl3</artifactId>
+        <version>${gdx.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.badlogicgames.gdx</groupId>
+        <artifactId>gdx-platform</artifactId>
+        <version>${gdx.version}</version>
+        <classifier>natives-desktop</classifier>
       </dependency>
     </dependencies>
   </dependencyManagement>
