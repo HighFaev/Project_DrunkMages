@@ -12,7 +12,9 @@ import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Label.LabelStyle;
+import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 
 import io.github.drunkmages.common.PlayerInfo;
@@ -29,9 +31,7 @@ import io.github.drunkmages.common.PlayerInfo;
  */
 public final class LobbyScreen implements Screen {
 
-    private final AtomicInteger                      myId;
-    private final AtomicReference<List<PlayerInfo>>  roster;
-    private final AtomicReference<String>            status;
+    private final LobbyGame game;
 
     // Scene2d
     private Stage stage;
@@ -40,6 +40,7 @@ public final class LobbyScreen implements Screen {
     // Fonts (disposed in dispose())
     private BitmapFont titleFont;
     private BitmapFont bodyFont;
+    private Skin skin;
 
     // Label styles (re-used across rebuilds)
     private LabelStyle titleStyle;
@@ -53,12 +54,8 @@ public final class LobbyScreen implements Screen {
     private List<PlayerInfo> lastRoster = null;
     private String           lastStatus = null;
 
-    public LobbyScreen(AtomicInteger myId,
-                       AtomicReference<List<PlayerInfo>> roster,
-                       AtomicReference<String> status) {
-        this.myId   = myId;
-        this.roster = roster;
-        this.status = status;
+    public LobbyScreen(LobbyGame game) {
+        this.game = game;
     }
 
     // -------------------------------------------------------------------------
@@ -81,6 +78,7 @@ public final class LobbyScreen implements Screen {
         selfStyle   = new LabelStyle(bodyFont, Color.CYAN);
         statusStyle = new LabelStyle(bodyFont, new Color(0.5f, 0.85f, 0.5f, 1f));
 
+        skin = buildButtonSkin(bodyFont);
         // Stage + root table
         stage = new Stage(new ScreenViewport());
         table = new Table();
@@ -88,15 +86,15 @@ public final class LobbyScreen implements Screen {
         table.top().left().pad(28f);
         stage.addActor(table);
 
-        rebuildTable(myId.get(), roster.get(), status.get());
+        rebuildTable(game.myId.get(), game.roster.get(), game.status.get());
     }
 
     @Override
     public void render(float delta) {
         // Snapshot atomics once per frame
-        int              curId     = myId.get();
-        List<PlayerInfo> curRoster = roster.get();
-        String           curStatus = status.get();
+        int              curId     = game.myId.get();
+        List<PlayerInfo> curRoster = game.roster.get();
+        String           curStatus = game.status.get();
 
         // Only rebuild the widget tree when something actually changed
         boolean rosterChanged = lastRoster == null || !curRoster.equals(lastRoster);
@@ -181,5 +179,43 @@ public final class LobbyScreen implements Screen {
         // ---- Status ---------------------------------------------------------
         table.add(new Label(curStatus, statusStyle)).left().colspan(2);
         table.row();
+    }
+
+    private static Skin buildButtonSkin(BitmapFont font) {
+        Skin skin = new Skin();
+        skin.add("default-font", font, BitmapFont.class);
+
+        com.badlogic.gdx.graphics.Pixmap pm;
+
+        pm = new com.badlogic.gdx.graphics.Pixmap(1, 1,
+                com.badlogic.gdx.graphics.Pixmap.Format.RGBA8888);
+        pm.setColor(new Color(0.20f, 0.20f, 0.35f, 1f)); pm.fill();
+        skin.add("btn-n", new com.badlogic.gdx.graphics.g2d.TextureRegion(
+                new com.badlogic.gdx.graphics.Texture(pm)));
+        pm.dispose();
+
+        pm = new com.badlogic.gdx.graphics.Pixmap(1, 1,
+                com.badlogic.gdx.graphics.Pixmap.Format.RGBA8888);
+        pm.setColor(new Color(0.30f, 0.20f, 0.30f, 1f)); pm.fill();
+        skin.add("btn-o", new com.badlogic.gdx.graphics.g2d.TextureRegion(
+                new com.badlogic.gdx.graphics.Texture(pm)));
+        pm.dispose();
+
+        pm = new com.badlogic.gdx.graphics.Pixmap(1, 1,
+                com.badlogic.gdx.graphics.Pixmap.Format.RGBA8888);
+        pm.setColor(new Color(0.13f, 0.13f, 0.22f, 1f)); pm.fill();
+        skin.add("btn-d", new com.badlogic.gdx.graphics.g2d.TextureRegion(
+                new com.badlogic.gdx.graphics.Texture(pm)));
+        pm.dispose();
+
+        TextButton.TextButtonStyle tbs = new TextButton.TextButtonStyle();
+        tbs.font      = font;
+        tbs.fontColor = Color.WHITE;
+        tbs.up        = skin.newDrawable("btn-n");
+        tbs.over      = skin.newDrawable("btn-o");
+        tbs.down      = skin.newDrawable("btn-d");
+        skin.add("default", tbs, TextButton.TextButtonStyle.class);
+
+        return skin;
     }
 }
