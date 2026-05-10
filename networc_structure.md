@@ -96,7 +96,8 @@ Angles are `f32` **radians**, measured clockwise from the positive X axis.
 
 | ID type | Type | Range | Notes |
 |---|---|---|---|
-| Player ID | `u16` | 1–65535 | Assigned at handshake |
+| Lobby roster (`WELCOME` / `ROSTER_UPDATE`) | `i32` | signed 32-bit | Session nickname map key |
+| Arena UDP slot (`MATCH_FOUND.local_player_id`) | `u16` | 1–65535 | One combatant inside an arena |
 | Entity ID | `u16` | 1–65535 | Unique per match; reused after death |
 | Item instance ID | `u32` | 1–2³²-1 | Unique per match; never reused |
 | Item type | `u16` | See §5.5 | Defines appearance and behaviour |
@@ -274,19 +275,26 @@ UDP packets are sent between the client's game port and the server's game port
 (default `25566`). The client must authenticate each UDP packet with its
 `player_id` and `match_id` so the server can reject spoofed packets.
 
+### Identifier mapping
+
+- **Lobby TCP `WELCOME` / `ROSTER_UPDATE`:** `player_id` is an **`i32` session identifier** unrelated to UDP slots.
+- **Arena TCP `MATCH_FOUND`:** emits **`local_player_id` (`u16`)**. That slot is exactly what UDP `player_id` must carry uplink.
+
+
 ### 5.1 UDP Header
 
-Every UDP packet — in both directions — begins with this fixed 11-byte header:
+Every UDP frame begins with **`HEADER_BYTES = 15`** (see [`UdpOpcodes`](common/src/main/java/io/github/drunkmages/common/net/udp/UdpOpcodes.java)) laid out below:
 
 ```
-u8   type                -- packet type (see §5.2)
-u32  seq                 -- sender's sequence number, monotonically increasing
-u32  tick                -- game tick this packet refers to
-u16  player_id           -- sender's player ID (client→server) or 0 (server→client)
+u8   type        -- discriminator (tables §5.2 onward)
+u32  seq         -- monotone sequence per directional socket (§11 replay guard)
+u32  tick        -- authoritative tick anchoring payload timing
+u16  player_id   -- `local_player_id` from `MATCH_FOUND` for client→server, `0` for server aggregates
+u32  match_id    -- copy of `MATCH_FOUND.match_id`, echoed both ways (`u32` bit pattern over the wire)
 ```
 
-The server ignores any UDP packet whose `player_id` does not match the
-authenticated session for that source IP:port, or whose `match_id` is wrong.
+The arena thread ignores packets violating IP binding rules, monotone `seq`, unknown `match_id`, or rogue `player_id` slots.
+
 
 ---
 

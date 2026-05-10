@@ -1,160 +1,760 @@
 package io.github.drunkmages.networking;
 
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.DuplicateFormatFlagsException;
-import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
-
 import io.github.drunkmages.common.Handshake;
 import io.github.drunkmages.common.PlayerInfo;
+import io.github.drunkmages.networking.game.MatchParticipant;
+import io.github.drunkmages.networking.game.MatchRuntime;
+
+import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelId;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.handler.codec.ByteToMessageDecoder;
+import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.util.concurrent.GlobalEventExecutor;
+import io.netty.util.concurrent.ScheduledFuture;
+
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.TimeUnit;
 
 /**
- * Dedicated server entry point.
- *
- * Wire format (server → client):
- * <pre>
- *   WELCOME  0x01  [i32 id]
- *   ROSTER   0x02  [i32 count] ( [i32 id] [u16 nameLen] [utf8 name] ) * count
- * </pre>
- *
- * A ROSTER broadcast is sent to every connected client whenever a player
- * joins or leaves.
+ * TCP lobby + UDP game-plane in one JVM. Defaults: TCP {@code 25565}, UDP {@code 25566}.
  */
 public final class NetworkServer {
 
-    private static final AtomicInteger IDS = new AtomicInteger(1);
-    /** All live channels — DefaultChannelGroup auto-removes closed channels. */
-    private static final ChannelGroup ALL = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
-    /** channelId → PlayerInfo for every player that has completed the handshake. */
-    private static final ConcurrentHashMap<ChannelId, PlayerInfo> PLAYERS = new ConcurrentHashMap<>();
+    static final int MIN_PLAYERS =
+            Integer.getInteger("javaroyale.lobby.minPlayers", 1);
+
+    static final int MATCH_COUNTDOWN =
+            Integer.getInteger("javaroyale.match.countdown", 5);
+
+    private static final AtomicInteger GLOBAL_LOBBY_IDS = new AtomicInteger(1);
+
+    /** First issued match identifier is {@code 1}. */
+
+
+    private static final AtomicInteger MATCH_IDS = new AtomicInteger(0);
+
+    private static final ConcurrentHashMap<String, Boolean> NICK_BOOK =
+            new ConcurrentHashMap<>();
+
+    private static final ChannelGroup ONLINE = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
+
+    private static final ConcurrentHashMap<ChannelId, LobbyPeer> SESSIONS =
+            new ConcurrentHashMap<>();
+
+    private static DatagramChannel UDP;
+
+    /** Current arena instance ( UDP thread only after creation ). */
+
+    static final AtomicReference<MatchRuntime> ARENA_REF = new AtomicReference<>();
+
+    private static volatile ScheduledFuture<?> SIM_LOOP;
+
+    private static volatile boolean COUNTDOWN_RUNNING;
+
+    private static String UDP_ADVERT_HOST;
 
     public static void main(String[] args) throws Exception {
-        int port = args.length > 0 ? Integer.parseInt(args[0]) : 25565;
-        EventLoopGroup boss = new NioEventLoopGroup(1);
-        EventLoopGroup workers = new NioEventLoopGroup();
+
+        final int tcpPort = args.length > 0 ? Integer.parseInt(args[0]) : 25565;
+
+        final int udpPort = args.length > 1 ? Integer.parseInt(args[1]) : 25566;
+
+        UDP_ADVERT_HOST =
+                System.getProperty(
+                        "javaroyale.advertise.host", InetAddress.getLoopbackAddress().getHostAddress());
+
+        var boss = new NioEventLoopGroup(1);
+
+        var workers = new NioEventLoopGroup();
+
         try {
-            ServerBootstrap bootstrap = Tcp.server(boss, workers);
-            bootstrap.childHandler(new ChannelInitializer<SocketChannel>() {
-                @Override
-                protected void initChannel(SocketChannel ch) {
-                    ch.pipeline().addLast(new HandshakeDecoder());
-                    ch.pipeline().addLast(new HandshakeHandler());
-                }
-            });
-            ChannelFuture bind = bootstrap.bind(port).sync();
-            System.out.println("server listening on " + port);
-            bind.channel().closeFuture().sync();
-        } finally {
+
+            Bootstrap udpBootstrap =
+                    new Bootstrap()
+                            .group(workers)
+                            .channel(NioDatagramChannel.class)
+                            .handler(
+                                    new ChannelInitializer<>() {
+
+
+                                        @Override
+                                        protected void initChannel(io.netty.channel.Channel child) {
+
+
+                                            child.pipeline()
+
+                                                    .addLast(new UdpIngressHandler(ARENA_REF::get));
+
+
+                                        }
+
+
+                                    });
+
+
+            UDP = (DatagramChannel) udpBootstrap.bind(udpPort).sync().channel();
+
+            ServerBootstrap tcp = Tcp.server(boss, workers);
+
+
+            var tcpListening =
+                    tcp.childHandler(
+                                    new ChannelInitializer<SocketChannel>() {
+
+
+                                        @Override
+                                        protected void initChannel(SocketChannel ch) {
+
+
+                                            ch.pipeline()
+
+
+                                                    .addLast(new TcpFromClientDecoder())
+
+
+                                                    .addLast(new LobbyHandler());
+
+                                        }
+
+
+                                    })
+
+
+                            .bind(tcpPort)
+
+
+                            .sync()
+
+
+                            .channel();
+
+
+            System.out.println("javaroyale TCP lobby :" + tcpPort);
+
+
+            System.out.println("javaroyale UDP arena  :" + udpPort);
+
+
+            tcpListening.closeFuture().sync();
+
+        }
+
+
+        finally {
+
+            stopTicker();
+
+            if (UDP != null) {
+
+
+                UDP.close().awaitUninterruptibly();
+
+            }
+
             boss.shutdownGracefully();
+
+
             workers.shutdownGracefully();
+
+
         }
+
+
     }
 
 
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
+    /** Stop ticking + drop arena binding. */
 
-    /** Encodes and broadcasts the current player list to every connected client. */
-    private static void broadcastRoster() {
-        List<PlayerInfo> snapshot = List.copyOf(PLAYERS.values());
 
-        List<byte[]> names = new ArrayList<>(snapshot.size());
-        int bufSize = 1 /* type */ + 4 /* count */;
-        for (PlayerInfo p: snapshot) {
-            byte[] nb = p.nickname().getBytes(StandardCharsets.UTF_8);
-            names.add(nb);
-            bufSize += 4 /* id */ + 2 /* nameLen */ + nb.length;
+    static void stopTicker() {
+
+
+        ScheduledFuture<?> f = SIM_LOOP;
+
+
+        SIM_LOOP = null;
+
+
+        ARENA_REF.set(null);
+
+
+        if (f != null) {
+
+
+            f.cancel(false);
+
         }
 
-        ByteBuf buf = Unpooled.buffer(bufSize);
-        buf.writeByte(0x02);
-        buf.writeInt(snapshot.size());
-        for (int i = 0; i < snapshot.size(); i++) {
-            buf.writeInt(snapshot.get(i).id());
-            buf.writeShort(names.get(i).length);
-            buf.writeBytes(names.get(i));
-        }
-        ALL.writeAndFlush(buf);
+
     }
 
 
+    static void broadcastRoster() {
 
-    // u16 length + UTF-8 nickname.
-    // TODO: swap for a real packet codec when we add the second packet type.
-    private static final class HandshakeDecoder extends ByteToMessageDecoder {
+
+        ByteBuf frame = LobbyTcpOutbound.rosterBroadcast(UDP.alloc(), rosterSnapshotLines());
+
+
+        ONLINE.writeAndFlush(frame);
+
+    }
+
+
+    static List<PlayerInfo> rosterSnapshotLines() {
+
+
+        return SESSIONS.values().stream()
+                .filter(LobbyPeer::handshakeFinished)
+
+
+                .sorted(Comparator.comparingInt(pk -> pk.info.id()))
+
+
+                .map(pk -> pk.info)
+
+
+                .toList();
+
+    }
+
+
+    static String normaliseNickname(String nickname) {
+
+
+        return nickname.trim().toLowerCase(Locale.ROOT);
+
+
+    }
+
+
+    /** Called when READY toggles — may enqueue match staging on UDP loop. */
+
+
+    static void tryBeginMatchScheduling() {
+
+
+        if (UDP == null || COUNTDOWN_RUNNING || ARENA_REF.get() != null) {
+
+
+            return;
+
+        }
+
+
+        List<LobbyPeer> participants =
+
+
+                SESSIONS.values().stream()
+
+
+                        .filter(LobbyPeer::handshakeFinished)
+
+
+                        .filter(LobbyPeer::isReadyToggle)
+
+
+                        .sorted(Comparator.comparingInt(p -> p.info.id()))
+
+
+                        .toList();
+
+
+        if (participants.size() < MIN_PLAYERS) {
+
+
+            return;
+
+        }
+
+
+        COUNTDOWN_RUNNING = true;
+
+
+        final List<LobbyPeer> immutable = List.copyOf(participants);
+
+
+        UDP.eventLoop().execute(() -> stageCountdown(immutable));
+
+    }
+
+
+    private static void stageCountdown(List<LobbyPeer> roster) {
+
+
+        int wireMid = MATCH_IDS.incrementAndGet();
+
+
+        int cds = MATCH_COUNTDOWN;
+
+
+        int udpBoundPort =
+                UDP.localAddress().getPort();
+
+
+        int howManyPlayers = roster.size();
+
+
+        ArrayList<MatchParticipant> maths = new ArrayList<>(howManyPlayers);
+
+
+        for (int idx =
+
+
+                0; idx <
+                        howManyPlayers; idx++) {
+
+
+            LobbyPeer member = roster.get(idx);
+
+
+            int slot = idx +
+                    1;
+
+
+            float angle =
+                    howManyPlayers == 1 ?
+                            0f :
+
+
+                            (float)
+
+
+                                    (
+                                            2.0 *
+
+                                                    Math.PI * idx /
+                                                    howManyPlayers);
+
+
+            float spawnX =
+                    (float)
+
+                            Math.cos(angle) *
+
+                            52f;
+
+
+            float spawnY =
+                    (float)
+
+                            Math.sin(angle) *
+
+                            52f;
+
+
+            member.spawnPx = spawnX;
+
+
+            member.spawnPy =
+                    spawnY;
+
+
+            member.slot = slot;
+
+
+            InetAddress ipa = unwrapRemoteIp(member.socket());
+
+            maths.add(new MatchParticipant(slot, spawnX, spawnY, ipa));
+
+            ByteBuf mf =
+                    LobbyTcpOutbound.matchFound(
+                            UDP.alloc(),
+                            wireMid & 0xffffffffL,
+                            UDP_ADVERT_HOST,
+                            udpBoundPort,
+                            slot,
+                            howManyPlayers,
+                            spawnX,
+                            spawnY,
+                            cds);
+
+            member.socket().writeAndFlush(mf);
+
+
+        }
+
+
+        scheduleCountdownPulses(roster, cds);
+
+        final List<LobbyPeer> frozenLobby = List.copyOf(roster);
+
+        final List<MatchParticipant> frozenMaths = List.copyOf(maths);
+
+        UDP.eventLoop()
+                .schedule(
+                        () -> commenceArena(frozenLobby, wireMid, frozenMaths),
+                        (long) cds * 1000L,
+                        TimeUnit.MILLISECONDS);
+
+    }
+
+
+    private static void scheduleCountdownPulses(List<LobbyPeer> roster,
+                                                int cds) {
+
+
+        for (int step =
+
+                1; step <=
+                        cds; step++) {
+
+
+            final int secondsLeftEcho = cds - step +
+                    1;
+
+
+            UDP.eventLoop()
+                    .schedule(
+                            () -> fanoutSeconds(roster, secondsLeftEcho),
+
+                            (long)
+
+                                    (step - 1),
+
+                            TimeUnit.SECONDS);
+
+        }
+
+
+    }
+
+
+    private static void fanoutSeconds(List<LobbyPeer> roster,
+                                      int secs) {
+
+
+        for (LobbyPeer p : roster) {
+
+
+            ByteBuf buf = LobbyTcpOutbound.matchCountdown(p.socket().alloc(), secs);
+
+            p.socket().writeAndFlush(buf);
+
+        }
+
+    }
+
+
+    private static void commenceArena(
+            List<LobbyPeer> participantChannels, int wireMidBits, List<MatchParticipant> mathsRoster) {
+
+        COUNTDOWN_RUNNING = false;
+
+        stopTicker();
+
+        MatchRuntime rt = new MatchRuntime(wireMidBits, mathsRoster);
+
+        ARENA_REF.set(rt);
+
+        int wallMs = clampToUnsignedIntExact(System.currentTimeMillis());
+
+        ByteBuf blast = LobbyTcpOutbound.matchStart(UDP.alloc(), 0, wallMs);
+
+        for (LobbyPeer peer : participantChannels) {
+
+            peer.socket().writeAndFlush(blast.retainedDuplicate());
+        }
+
+        blast.release();
+
+        SIM_LOOP =
+                UDP.eventLoop()
+                        .scheduleAtFixedRate(
+                                () -> {
+                                    MatchRuntime head = ARENA_REF.get();
+                                    if (head != null) {
+                                        head.advanceAndMulticast(UDP);
+                                    }
+                                },
+                                50,
+                                50,
+                                TimeUnit.MILLISECONDS);
+    }
+
+    private static InetAddress unwrapRemoteIp(io.netty.channel.Channel upstream) {
+
+
+        return ((InetSocketAddress) upstream.remoteAddress()).getAddress();
+
+    }
+
+
+    private static int clampToUnsignedIntExact(long wall) {
+
+
+        return (int) (wall &
+                0xffffffffL);
+
+
+    }
+
+
+    static final class LobbyPeer {
+
+
+        private final io.netty.channel.Channel channelBridge;
+
+        private final PlayerInfo info;
+
+        volatile boolean handshakeFinished;
+
+
+        volatile boolean readyToggle;
+
+
+        float spawnPx;
+
+        float spawnPy;
+
+        int slot;
+
+
+        LobbyPeer(io.netty.channel.Channel channelBridge,
+
+                  PlayerInfo info) {
+
+
+            this.channelBridge =
+                    channelBridge;
+
+
+            this.info =
+                    info;
+
+        }
+
+
+        io.netty.channel.Channel socket() {
+
+
+            return channelBridge;
+
+        }
+
+
+        boolean handshakeFinished() {
+
+
+            return handshakeFinished;
+
+
+        }
+
+
+        boolean isReadyToggle() {
+
+
+            return readyToggle;
+
+        }
+
+
+    }
+
+
+    /** Per-TCP-connection lobby shim. */
+
+
+    static final class LobbyHandler extends SimpleChannelInboundHandler<Object> {
+
+
+        LobbyPeer selfAttach;
+
 
         @Override
-        protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) {
-            if (in.readableBytes() < 2) {
-                return;
+
+
+        protected void channelRead0(ChannelHandlerContext ctx,
+                                    Object inbound) {
+
+
+            if (inbound instanceof Handshake handshake) {
+
+
+                ingestHandshake(ctx,
+                        handshake);
+
+            } else if (inbound == ReadyC2S.INSTANCE) {
+
+
+                if (selfAttach !=
+                        null) {
+
+
+                    selfAttach.readyToggle =
+
+
+                            true;
+
+
+                    tryBeginMatchScheduling();
+
+                }
+
             }
-            in.markReaderIndex();
-            int length = in.readUnsignedShort();
-            if (in.readableBytes() < length) {
-                // payload not fully here yet, rewind and wait
-                in.resetReaderIndex();
-                return;
+
+
+            else if (inbound == LeaveLobbyC2S.INSTANCE) {
+
+
+                ctx.close();
+
             }
-            byte[] raw = new byte[length];
-            in.readBytes(raw);
-            out.add(new Handshake(new String(raw, StandardCharsets.UTF_8)));
+
+
         }
-    }
-
-    private static final class HandshakeHandler extends SimpleChannelInboundHandler<Handshake> {
-
-        private volatile ChannelId channelId;
 
 
-        @Override
-        protected void channelRead0(ChannelHandlerContext ctx, Handshake handshake) {
-            int id = IDS.getAndIncrement();
-            channelId = ctx.channel().id();
-            PLAYERS.put(channelId, new PlayerInfo(id, handshake.nickname()));
-            ALL.add(ctx.channel());
+        private void ingestHandshake(ChannelHandlerContext ctx,
 
-            System.out.println("joined " + handshake.nickname() + " as " + id);
-            // welcome
-            ByteBuf response = ctx.alloc().buffer(5);
-            response.writeByte(0x01);
-            response.writeInt(id);
-            ctx.writeAndFlush(response);
+                                     Handshake hs) {
+
+
+            if (selfAttach !=
+
+
+                    null) {
+
+
+                ctx.close();
+
+                return;
+
+
+            }
+
+
+            final String trimmed = hs.nickname().trim();
+
+
+            if (trimmed.isBlank() || trimmed.length() >
+                    32) {
+
+
+                ctx.close();
+
+
+                return;
+
+            }
+
+
+            String finger = NetworkServer.normaliseNickname(trimmed);
+
+            Boolean collision =
+
+
+                    NetworkServer.NICK_BOOK.putIfAbsent(finger, Boolean.TRUE);
+
+
+            if (collision !=
+
+
+                    null) {
+
+
+                ctx.close();
+
+                return;
+
+            }
+
+
+            int lobbySerial = GLOBAL_LOBBY_IDS.getAndIncrement();
+
+            LobbyPeer neo =
+
+
+                    new LobbyPeer(ctx.channel(), new PlayerInfo(lobbySerial, trimmed));
+
+
+            SESSIONS.put(ctx.channel().id(), neo);
+
+
+            ONLINE.add(ctx.channel());
+
+            selfAttach =
+                    neo;
+
+            neo.handshakeFinished =
+                    true;
+
+
+            ctx.writeAndFlush(LobbyTcpOutbound.welcome(ctx.alloc(), neo.info.id()));
 
             broadcastRoster();
+
+
         }
 
+
         @Override
+
+
         public void channelInactive(ChannelHandlerContext ctx) {
-            if (channelId != null) {
-                PlayerInfo left = PLAYERS.remove(channelId);
-                // ALL auto-removes the closed channel; no manual remove needed.
-                if (left != null) {
-                    System.out.println("left " + left.nickname() + " (id=" + left.id() + ")");
-                    broadcastRoster();
-                }
+
+
+            LobbyPeer left = SESSIONS.remove(ctx.channel().id());
+
+            if (left !=
+                    null) {
+
+
+                ONLINE.remove(ctx.channel());
+
+                NICK_BOOK.remove(normaliseNickname(left.info.nickname()));
+
+
+                broadcastRoster();
+
+
             }
+
+
         }
 
+
         @Override
-        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-            cause.printStackTrace();
+
+
+        public void exceptionCaught(ChannelHandlerContext ctx,
+
+                                    Throwable thr) {
+
+
+            thr.printStackTrace();
+
+
             ctx.close();
+
         }
+
+
     }
+
 
     private NetworkServer() {
+
+
     }
+
+
 }
