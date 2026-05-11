@@ -1,91 +1,114 @@
 package io.github.drunkmages.networking;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 import io.github.drunkmages.common.Handshake;
 import io.github.drunkmages.common.PlayerInfo;
 import io.github.drunkmages.common.RosterUpdate;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 
-import java.util.List;
-
 /**
- * Connects to the game server, sends the handshake, and then stays open to
- * receive WELCOME and ROSTER packets.  Callers are notified via {@link Listener}.
+ * Game server client.  Create one instance, call {@link #connect} on a
+ * background thread (it blocks until the connection closes), and call
+ * {@link #disconnect} from any thread to tear it down — e.g. when the
+ * game window is closed.
  *
- * <p>Intended to be run on a background thread; {@link #connect} blocks until
- * the connection is closed.
+ * IMPORTANT: connect() must be an *instance* method so that it can write
+ * to this.channel / this.group, which disconnect() reads.  A static method
+ * cannot do that — that was the previous bug causing disconnect() to be a no-op.
  */
 public final class NetworkClient {
 
     public interface Listener {
-        /** Called once, after the server sends back our assigned id. */
         void onWelcome(int myId);
-        /** Called every time the server broadcasts a fresh roster (join / leave). */
         void onRosterUpdate(List<PlayerInfo> players);
-        /** Called when the channel closes for any reason. */
         void onDisconnected();
     }
 
-    private volatile Channel channel;
-    private volatile EventLoopGroup   group;
+    // Written once by the connect() thread; read by disconnect() from any thread.
+    private volatile Channel        channel;
+    private volatile EventLoopGroup group;
 
-    public static void connect(String host, int port, String nickname, Listener listener) throws Exception {
+    /**
+     * Opens a TCP connection, sends the handshake, then blocks until the
+     * connection closes (either by the server or by {@link #disconnect}).
+     * Call this on a background thread.
+     */
+    public void connect(String host, int port, String nickname,
+                        Listener listener) throws Exception {
         Handshake handshake = new Handshake(nickname);
-        EventLoopGroup group = new NioEventLoopGroup();
+
+        // Assign to the instance field BEFORE connecting so disconnect() can
+        // reach the group even if the channel hasn't been assigned yet.
+        group = new NioEventLoopGroup();
         try {
             Bootstrap bootstrap = Tcp.client(group);
             bootstrap.handler(new ChannelInitializer<SocketChannel>() {
                 @Override
                 protected void initChannel(SocketChannel ch) {
                     ch.pipeline()
-                    .addLast(new ServerPacketDecoder())
-                    .addLast(new ChannelInboundHandlerAdapter() {
-                        @Override
-                        public void channelActive(ChannelHandlerContext ctx) {
-                            byte[] raw = handshake.nickname().getBytes(StandardCharsets.UTF_8);
-                            ByteBuf buf = ctx.alloc().buffer(2 + raw.length);
-                            buf.writeShort(raw.length);
-                            buf.writeBytes(raw);
-                            ctx.writeAndFlush(buf);
-                        }
+                            .addLast(new ServerPacketDecoder())
+                            .addLast(new ChannelInboundHandlerAdapter() {
 
-                        @Override
-                        public void channelRead(ChannelHandlerContext ctx, Object msg) {
-                            if (msg instanceof WelcomePacket w) {
-                                listener.onWelcome(w.id());
-                            } else if (msg instanceof RosterUpdate r) {
-                                listener.onRosterUpdate(r.players());
-                            }
-                        }
+                                @Override
+                                public void channelActive(ChannelHandlerContext ctx) {
+                                    byte[] raw = handshake.nickname()
+                                            .getBytes(StandardCharsets.UTF_8);
+                                    ByteBuf buf = ctx.alloc().buffer(2 + raw.length);
+                                    buf.writeShort(raw.length);
+                                    buf.writeBytes(raw);
+                                    ctx.writeAndFlush(buf);
+                                }
 
-                        @Override
-                        public void channelInactive(ChannelHandlerContext ctx) {
-                            listener.onDisconnected();
-                        }
+                                @Override
+                                public void channelRead(ChannelHandlerContext ctx, Object msg) {
+                                    if (msg instanceof WelcomePacket w) {
+                                        listener.onWelcome(w.id());
+                                    } else if (msg instanceof RosterUpdate r) {
+                                        listener.onRosterUpdate(r.players());
+                                    }
+                                }
 
-                        @Override
-                        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-                            cause.printStackTrace();
-                            ctx.close();
-                        }
-                    });
+                                @Override
+                                public void channelInactive(ChannelHandlerContext ctx) {
+                                    listener.onDisconnected();
+                                }
+
+                                @Override
+                                public void exceptionCaught(ChannelHandlerContext ctx,
+                                                            Throwable cause) {
+                                    cause.printStackTrace();
+                                    ctx.close();
+                                }
+                            });
                 }
             });
+
             ChannelFuture future = bootstrap.connect(host, port).sync();
-            System.out.println("connected " + host + ":" + port + " nick=" + handshake.nickname());
-            // wait until welcome handler closes us
-            future.channel().closeFuture().sync();
-            System.out.println("disconected");
+            channel = future.channel(); // now disconnect() can close it
+            System.out.println("connected " + host + ":" + port
+                    + " nick=" + handshake.nickname());
+            channel.closeFuture().sync();
+            System.out.println("disconnected");
         } finally {
             group.shutdownGracefully();
         }
     }
 
+    /**
+     * Closes the channel and shuts down Netty's event loop.
+     * Safe to call from any thread. Returns immediately; teardown is async.
+     */
     public void disconnect() {
         Channel ch = channel;
         if (ch != null) ch.close();
