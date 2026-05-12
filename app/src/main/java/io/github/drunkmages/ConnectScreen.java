@@ -94,19 +94,19 @@ public final class ConnectScreen implements Screen {
 
         // Host
         root.add(new Label("Host", bodyStyle)).width(LABEL_WIDTH).right().padRight(12f).padBottom(ROW_PAD);
-        hostField = new TextField("127.0.0.1", skin);
+        hostField = new TextField(game.defaultConnectHost, skin);
         root.add(hostField).width(FIELD_WIDTH).padBottom(ROW_PAD);
         root.row();
 
         // Port
         root.add(new Label("Port", bodyStyle)).right().padRight(12f).padBottom(ROW_PAD);
-        portField = new TextField("25565", skin);
+        portField = new TextField(game.defaultConnectPort, skin);
         root.add(portField).width(FIELD_WIDTH).padBottom(ROW_PAD);
         root.row();
 
         // Nickname
         root.add(new Label("Nickname", bodyStyle)).right().padRight(12f).padBottom(ROW_PAD);
-        nickField = new TextField("mark", skin);
+        nickField = new TextField(game.defaultConnectNick, skin);
         nickField.setMaxLength(32);
         nickField.setMessageText("your name");
         root.add(nickField).width(FIELD_WIDTH).padBottom(ROW_PAD);

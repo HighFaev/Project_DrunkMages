@@ -69,6 +69,10 @@ public final class NetworkServer {
 
     private static volatile boolean COUNTDOWN_RUNNING;
 
+
+    private static volatile int LOBBY_EPOCH;
+
+
     private static String UDP_ADVERT_HOST;
 
     public static void main(String[] args) throws Exception {
@@ -207,6 +211,36 @@ public final class NetworkServer {
     }
 
 
+    /** No TCP clients left — drop arena/ticker so the next session can Ready-queue normally. */
+
+
+    static void shutdownArenaIfNobodyOnline() {
+
+
+        if (!SESSIONS.isEmpty()) {
+
+
+            return;
+
+
+        }
+
+
+        if (ARENA_REF.get() != null || SIM_LOOP != null) {
+
+
+            stopTicker();
+
+
+        }
+
+
+        COUNTDOWN_RUNNING = false;
+
+
+    }
+
+
     static void broadcastRoster() {
 
 
@@ -228,7 +262,7 @@ public final class NetworkServer {
                 .sorted(Comparator.comparingInt(pk -> pk.info.id()))
 
 
-                .map(pk -> pk.info)
+                .map(pk -> new PlayerInfo(pk.info.id(), pk.info.nickname(), pk.readyToggle))
 
 
                 .toList();
@@ -240,6 +274,27 @@ public final class NetworkServer {
 
 
         return nickname.trim().toLowerCase(Locale.ROOT);
+
+
+    }
+
+
+    static void lobbyCompositionChanged() {
+
+
+        LOBBY_EPOCH++;
+
+
+        COUNTDOWN_RUNNING = false;
+
+
+        for (LobbyPeer peer : SESSIONS.values()) {
+
+
+            peer.readyToggle = false;
+
+
+        }
 
 
     }
@@ -259,7 +314,7 @@ public final class NetworkServer {
         }
 
 
-        List<LobbyPeer> participants =
+        List<LobbyPeer> everyone =
 
 
                 SESSIONS.values().stream()
@@ -268,16 +323,13 @@ public final class NetworkServer {
                         .filter(LobbyPeer::handshakeFinished)
 
 
-                        .filter(LobbyPeer::isReadyToggle)
-
-
                         .sorted(Comparator.comparingInt(p -> p.info.id()))
 
 
                         .toList();
 
 
-        if (participants.size() < MIN_PLAYERS) {
+        if (everyone.size() < MIN_PLAYERS) {
 
 
             return;
@@ -285,18 +337,41 @@ public final class NetworkServer {
         }
 
 
+        if (!everyone.stream().allMatch(LobbyPeer::isReadyToggle)) {
+
+
+            return;
+
+        }
+
+
+        final int epochSnap = LOBBY_EPOCH;
+
+
         COUNTDOWN_RUNNING = true;
 
 
-        final List<LobbyPeer> immutable = List.copyOf(participants);
+        final List<LobbyPeer> immutable = List.copyOf(everyone);
 
 
-        UDP.eventLoop().execute(() -> stageCountdown(immutable));
+        UDP.eventLoop().execute(() -> stageCountdown(immutable, epochSnap));
 
     }
 
 
-    private static void stageCountdown(List<LobbyPeer> roster) {
+    private static void stageCountdown(List<LobbyPeer> roster, int epochSnapshot) {
+
+
+        if (epochSnapshot != LOBBY_EPOCH) {
+
+
+            COUNTDOWN_RUNNING = false;
+
+
+            return;
+
+
+        }
 
 
         int wireMid = MATCH_IDS.incrementAndGet();
@@ -392,7 +467,7 @@ public final class NetworkServer {
         }
 
 
-        scheduleCountdownPulses(roster, cds);
+        scheduleCountdownPulses(roster, cds, epochSnapshot);
 
         final List<LobbyPeer> frozenLobby = List.copyOf(roster);
 
@@ -400,7 +475,23 @@ public final class NetworkServer {
 
         UDP.eventLoop()
                 .schedule(
-                        () -> commenceArena(frozenLobby, wireMid, frozenMaths),
+                        () -> {
+
+                            if (epochSnapshot != LOBBY_EPOCH) {
+
+
+                                COUNTDOWN_RUNNING = false;
+
+
+                                return;
+
+
+                            }
+
+
+                            commenceArena(frozenLobby, wireMid, frozenMaths);
+
+                        },
                         (long) cds * 1000L,
                         TimeUnit.MILLISECONDS);
 
@@ -408,7 +499,8 @@ public final class NetworkServer {
 
 
     private static void scheduleCountdownPulses(List<LobbyPeer> roster,
-                                                int cds) {
+                                                int cds,
+                                                int epochSnapshot) {
 
 
         for (int step =
@@ -421,13 +513,29 @@ public final class NetworkServer {
                     1;
 
 
+            final int stepFinal = step;
+
+
             UDP.eventLoop()
                     .schedule(
-                            () -> fanoutSeconds(roster, secondsLeftEcho),
+                            () -> {
+
+                                if (epochSnapshot != LOBBY_EPOCH) {
+
+
+                                    return;
+
+
+                                }
+
+
+                                fanoutSeconds(roster, secondsLeftEcho);
+
+                            },
 
                             (long)
 
-                                    (step - 1),
+                                    (stepFinal - 1),
 
                             TimeUnit.SECONDS);
 
@@ -605,6 +713,9 @@ public final class NetworkServer {
                             true;
 
 
+                    broadcastRoster();
+
+
                     tryBeginMatchScheduling();
 
                 }
@@ -683,7 +794,7 @@ public final class NetworkServer {
             LobbyPeer neo =
 
 
-                    new LobbyPeer(ctx.channel(), new PlayerInfo(lobbySerial, trimmed));
+                    new LobbyPeer(ctx.channel(), new PlayerInfo(lobbySerial, trimmed, false));
 
 
             SESSIONS.put(ctx.channel().id(), neo);
@@ -699,6 +810,9 @@ public final class NetworkServer {
 
 
             ctx.writeAndFlush(LobbyTcpOutbound.welcome(ctx.alloc(), neo.info.id()));
+
+            lobbyCompositionChanged();
+
 
             broadcastRoster();
 
@@ -723,7 +837,13 @@ public final class NetworkServer {
                 NICK_BOOK.remove(normaliseNickname(left.info.nickname()));
 
 
+                lobbyCompositionChanged();
+
+
                 broadcastRoster();
+
+
+                shutdownArenaIfNobodyOnline();
 
 
             }

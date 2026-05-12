@@ -20,6 +20,7 @@ import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.util.concurrent.ScheduledFuture;
 
 import java.net.InetSocketAddress;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -166,6 +167,25 @@ public final class NetworkClient {
     }
 
 
+    /** One player row from WORLD_SNAPSHOT (MVP layout from {@code WorldSnapshotCodec}). */
+    public record SnapshotPlayer(int entityId, float x, float y, float aimRadians, int hp, int maxHp) {
+
+
+    }
+
+
+    /**
+     * Aim + WASD bitmask for UDP INPUT (see {@code MatchRuntime.applyMotion}: bits 0–3 = up, down, left, right).
+     */
+    public record DriveSlice(float aimRadians, int moveButtonsMask) {
+
+
+        public static final DriveSlice NEUTRAL = new DriveSlice(0f, 0);
+
+
+    }
+
+
     private volatile EventLoopGroup netCluster_;
 
     private volatile Channel tcpControl_;
@@ -293,17 +313,36 @@ public final class NetworkClient {
 
         Channel up = tcpControl_;
 
-        if (up !=
+        if (up == null || !up.isActive()) {
 
 
-                null
+            return;
 
 
-                &&
-                up.isActive()) {
+        }
+
+
+        io.netty.channel.EventLoop loop = up.eventLoop();
+
+        if (loop.inEventLoop()) {
 
 
             up.writeAndFlush(LobbyTcpOutbound.playerReady(up.alloc()));
+
+        } else {
+
+
+            loop.execute(() -> {
+
+                if (up.isActive()) {
+
+
+                    up.writeAndFlush(LobbyTcpOutbound.playerReady(up.alloc()));
+
+                }
+
+
+            });
 
         }
 
@@ -387,6 +426,14 @@ public final class NetworkClient {
 
                 new AtomicReference<>();
 
+        private final AtomicReference<List<SnapshotPlayer>> lastPlayers = new AtomicReference<>(List.of());
+
+        private final AtomicReference<DriveSlice> pendingDrive = new AtomicReference<>(DriveSlice.NEUTRAL);
+
+
+        /** Bytes per entity blob in {@code WorldSnapshotCodec.encode} for ENTITY_PLAYER. */
+        private static final int SNAPSHOT_PLAYER_ENTITY_BYTES = 30;
+
 
         private int seqOutbound_;
 
@@ -444,7 +491,7 @@ public final class NetworkClient {
                                                 ByteBuf nectar = pkt.content();
 
 
-                                                decodeSnapshotHud(nectar);
+                                                decodeWorldSnapshot(nectar);
 
                                             }
 
@@ -462,9 +509,13 @@ public final class NetworkClient {
 
                 active.set(true);
 
+                lastPlayers.set(List.of());
+
+                pendingDrive.set(DriveSlice.NEUTRAL);
+
                 cadence_ =
                         cannon_.eventLoop()
-                                .scheduleAtFixedRate(GameUdpClient.this::emitIdleNeutralInputSlice,
+                                .scheduleAtFixedRate(GameUdpClient.this::emitInputSlice,
                                         40,
                                         40,
                                         TimeUnit.MILLISECONDS);
@@ -487,24 +538,11 @@ public final class NetworkClient {
 
 
         /**
-         * §5 WORLD_SNAPSHOT — parse header + HUD fields only.
-
-
+         * §5 WORLD_SNAPSHOT — header, HUD fields, and MVP player positions (matches {@code WorldSnapshotCodec}).
          */
 
 
-        private void decodeSnapshotHud(ByteBuf raw) {
-
-
-            if (!raw.isReadable(UdpOpcodes.HEADER_BYTES +
-
-
-                    2)) {
-
-                return;
-
-
-            }
+        private void decodeWorldSnapshot(ByteBuf raw) {
 
 
             raw.markReaderIndex();
@@ -512,13 +550,7 @@ public final class NetworkClient {
             try {
 
 
-                UdpHeader head =
-
-
-                        UdpHeader.read(raw);
-
-                if (head.type() !=
-                        UdpOpcodes.S_WORLD_SNAPSHOT) {
+                if (!raw.isReadable(UdpOpcodes.HEADER_BYTES + 2)) {
 
 
                     return;
@@ -526,26 +558,85 @@ public final class NetworkClient {
 
                 }
 
-                /*
-                 * flags + entity counters from §5.4
-                 */
+
+                UdpHeader head = UdpHeader.read(raw);
+
+                if (head.type() != UdpOpcodes.S_WORLD_SNAPSHOT) {
+
+
+                    raw.resetReaderIndex();
+
+                    return;
+
+
+                }
 
 
                 raw.readUnsignedByte();
 
                 int entityBurst = raw.readUnsignedByte();
 
+                UdpHud hud = new UdpHud(head.seqUnsigned(), head.tickUnsigned(), entityBurst);
 
-                lastPeek.set(new UdpHud(head.seqUnsigned(), head.tickUnsigned(), entityBurst));
+                ArrayList<SnapshotPlayer> acc = new ArrayList<>(Math.min(entityBurst, 64));
+
+                for (int i = 0; i < entityBurst; i++) {
+
+
+                    if (!raw.isReadable(SNAPSHOT_PLAYER_ENTITY_BYTES)) {
+
+
+                        raw.resetReaderIndex();
+
+                        return;
+
+
+                    }
+
+
+                    int entityId = raw.readUnsignedShort();
+
+                    byte entityType = raw.readByte();
+
+                    float x = raw.readFloat();
+
+                    float y = raw.readFloat();
+
+                    float aim = raw.readFloat();
+
+                    raw.skipBytes(1);
+
+                    int hp = raw.readUnsignedShort();
+
+                    int maxHp = raw.readUnsignedShort();
+
+                    raw.skipBytes(10);
+
+                    if (entityType == UdpOpcodes.ENTITY_PLAYER) {
+
+
+                        acc.add(new SnapshotPlayer(entityId, x, y, aim, hp, maxHp));
+
+
+                    }
+
+
+                }
+
+
+                lastPeek.set(hud);
+
+                lastPlayers.set(List.copyOf(acc));
 
 
             }
 
 
-            finally {
+            catch (RuntimeException ignored) {
 
 
                 raw.resetReaderIndex();
+
 
             }
 
@@ -553,10 +644,34 @@ public final class NetworkClient {
         }
 
 
-        /** §5 INPUT with neutral controls for connectivity smoke-testing. */
+        /** Latest parsed players from WORLD_SNAPSHOT (immutable list; possibly empty). */
 
 
-        private void emitIdleNeutralInputSlice() {
+        public List<SnapshotPlayer> snapshotPlayersPeek() {
+
+
+            return lastPlayers.get();
+
+
+        }
+
+
+        /** Called from the game render thread: aim + WASD bitmask (bits 0–3). */
+
+
+        public void setDriveInput(float aimRadians, int moveButtonsMask) {
+
+
+            pendingDrive.set(new DriveSlice(aimRadians, moveButtonsMask & 0xff));
+
+
+        }
+
+
+        /** §5 INPUT — velocity slots unused when buttons drive movement on server. */
+
+
+        private void emitInputSlice() {
 
 
             Channel z = cannon_;
@@ -592,6 +707,8 @@ public final class NetworkClient {
 
                             0xFF;
 
+
+            DriveSlice slice = pendingDrive.get();
 
             ByteBuf buf =
 
@@ -640,7 +757,7 @@ public final class NetworkClient {
             buf.writeFloat(
 
 
-                    0);
+                    slice.aimRadians());
 
 
             /*
@@ -649,7 +766,7 @@ public final class NetworkClient {
             buf.writeByte(
 
 
-                    0);
+                    slice.moveButtonsMask());
 
 
             buf.writeByte(
@@ -671,6 +788,12 @@ public final class NetworkClient {
 
 
             active.set(false);
+
+            lastPeek.set(null);
+
+            lastPlayers.set(List.of());
+
+            pendingDrive.set(DriveSlice.NEUTRAL);
 
             ScheduledFuture<?> ticker = cadence_;
 

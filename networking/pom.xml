@@ -35,9 +35,9 @@
         <groupId>org.codehaus.mojo</groupId>
         <artifactId>exec-maven-plugin</artifactId>
         <version>3.5.1</version>
-        <configuration>
-          <classpathScope>test</classpathScope>
-        </configuration>
+        <!-- Default classpathScope is runtime (compile deps + javaroyale-common).
+             Do NOT set scope=test here: NetworkServer would miss Handshake / common on classpath.
+             For mains under src/test/java use: -Dexec.classpathScope=test -->
       </plugin>
     </plugins>
   </build>

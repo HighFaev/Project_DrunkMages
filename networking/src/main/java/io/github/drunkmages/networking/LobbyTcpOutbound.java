@@ -25,7 +25,7 @@ final class LobbyTcpOutbound {
     static ByteBuf rosterBroadcast(ByteBufAllocator alloc, Collection<PlayerInfo> players) {
         int size = 5;
         for (PlayerInfo p : players) {
-            size += 4 + 2 + p.nickname().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+            size += 4 + 2 + p.nickname().getBytes(java.nio.charset.StandardCharsets.UTF_8).length + 1;
         }
         var out = alloc.buffer(size);
         out.writeByte(TcpOpcodes.S_ROSTER_UPDATE);
@@ -33,6 +33,7 @@ final class LobbyTcpOutbound {
         for (PlayerInfo p : players) {
             out.writeInt(p.id());
             Wire.writeStr(out, p.nickname());
+            out.writeByte(p.lobbyReady() ? 1 : 0);
         }
         return out;
     }

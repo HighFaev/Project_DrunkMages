@@ -66,18 +66,24 @@ final class TcpFromServerDecoder extends ByteToMessageDecoder {
         }
         List<PlayerInfo> players = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
+            /* playerId + u16 length prefix + UTF-8 payload */
             if (in.readableBytes() < 4 + 2) {
                 rewind(in);
                 return;
             }
             int playerId = in.readInt();
             int nameLen = in.getUnsignedShort(in.readerIndex());
-            if (in.readableBytes() < 4 + 2 + nameLen) {
+            if (in.readableBytes() < 2 + nameLen) {
                 rewind(in);
                 return;
             }
             String nick = Wire.readStr(in);
-            players.add(new PlayerInfo(playerId, nick));
+            if (!in.isReadable(1)) {
+                rewind(in);
+                return;
+            }
+            boolean lobbyReady = in.readUnsignedByte() != 0;
+            players.add(new PlayerInfo(playerId, nick, lobbyReady));
         }
         out.add(new RosterUpdate(List.copyOf(players)));
     }
