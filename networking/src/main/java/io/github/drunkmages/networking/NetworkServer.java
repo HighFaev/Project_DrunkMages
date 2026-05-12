@@ -304,46 +304,29 @@ public final class NetworkServer {
 
 
     static void tryBeginMatchScheduling() {
-
-
-        if (UDP == null || COUNTDOWN_RUNNING || ARENA_REF.get() != null) {
-
-
+        if (UDP == null || COUNTDOWN_RUNNING) {
             return;
-
         }
 
 
-        List<LobbyPeer> everyone =
-
-
-                SESSIONS.values().stream()
-
-
-                        .filter(LobbyPeer::handshakeFinished)
-
-
-                        .sorted(Comparator.comparingInt(p -> p.info.id()))
-
-
-                        .toList();
+        List<LobbyPeer> everyone = SESSIONS.values().stream()
+                .filter(LobbyPeer::handshakeFinished)
+                .sorted(Comparator.comparingInt(p -> p.info.id()))
+                .toList();
 
 
         if (everyone.size() < MIN_PLAYERS) {
-
-
             return;
-
         }
 
 
         if (!everyone.stream().allMatch(LobbyPeer::isReadyToggle)) {
-
-
             return;
-
         }
 
+        if (ARENA_REF.get() != null) {
+            stopTicker();
+        }
 
         final int epochSnap = LOBBY_EPOCH;
 
@@ -577,10 +560,10 @@ public final class NetworkServer {
         ByteBuf blast = LobbyTcpOutbound.matchStart(UDP.alloc(), 0, wallMs);
 
         for (LobbyPeer peer : participantChannels) {
-
+            peer.readyToggle = false;
             peer.socket().writeAndFlush(blast.retainedDuplicate());
         }
-
+        broadcastRoster();
         blast.release();
 
         SIM_LOOP =

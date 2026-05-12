@@ -235,6 +235,7 @@ public final class MatchRuntime {
 
         if (in != null) {
             aim = in.aimAngle();
+            ps.isShooting = (in.buttons() & 128) != 0;
             float rawVx = in.velX();
             float rawVy = in.velY();
 

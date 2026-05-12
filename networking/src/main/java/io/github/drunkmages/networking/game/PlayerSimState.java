@@ -12,6 +12,7 @@ final class PlayerSimState {
     volatile float velX;
     volatile float velY;
     volatile float aimAngle;
+    volatile boolean isShooting;
 
     volatile int hp = 100;
     final int maxHp = 100;

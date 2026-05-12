@@ -168,7 +168,7 @@ public final class NetworkClient {
 
 
     /** One player row from WORLD_SNAPSHOT (MVP layout from {@code WorldSnapshotCodec}). */
-    public record SnapshotPlayer(int entityId, float x, float y, float aimRadians, int hp, int maxHp) {
+    public record SnapshotPlayer(int entityId, float x, float y, float aimRadians, int hp, int maxHp, int anim) {
 
 
     }
@@ -610,12 +610,15 @@ public final class NetworkClient {
 
                     int maxHp = raw.readUnsignedShort();
 
-                    raw.skipBytes(10);
+                    raw.skipBytes(4); // shield (2) + max shield (2)
+                    raw.skipBytes(1); // held slot
+                    int anim = raw.readUnsignedByte(); // Extract animation!
+                    raw.skipBytes(4); // inv0, inv1, ammo_p, ammo_s
 
                     if (entityType == UdpOpcodes.ENTITY_PLAYER) {
 
 
-                        acc.add(new SnapshotPlayer(entityId, x, y, aim, hp, maxHp));
+                        acc.add(new SnapshotPlayer(entityId, x, y, aim, hp, maxHp, anim));
 
 
                     }

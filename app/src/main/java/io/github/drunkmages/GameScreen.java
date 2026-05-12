@@ -97,6 +97,13 @@ public final class GameScreen implements Screen {
     private final LobbyGame        game;
     private final MatchFoundPacket matchInfo;
 
+    private static final class RenderEntity {
+        float x, y;
+        boolean initialized;
+    }
+    private final RenderEntity[] renderEntities = new RenderEntity[256];
+    private final float[] otherFireCooldown = new float[256];
+
     private OrthographicCamera worldCam;
     private ShapeRenderer      shapes;
     private SpriteBatch        batch;
@@ -148,6 +155,9 @@ public final class GameScreen implements Screen {
 
     @Override
     public void show() {
+        for (int i = 0; i < 256; i++) {
+            renderEntities[i] = new RenderEntity();
+        }
         worldCam = new OrthographicCamera();
         resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
 
@@ -197,21 +207,46 @@ public final class GameScreen implements Screen {
         if (Gdx.input.isKeyPressed(Keys.S)) buttons |= BTN_UP;
         if (Gdx.input.isKeyPressed(Keys.A)) buttons |= BTN_LEFT;
         if (Gdx.input.isKeyPressed(Keys.D)) buttons |= BTN_RIGHT;
+        if (Gdx.input.isButtonPressed(Buttons.LEFT)) buttons |= 128;
 
         // ── 2. Locate self in the latest snapshot ─────────────────────────────
         List<NetworkClient.SnapshotPlayer> snap = game.udp.snapshotPlayersPeek();
         int selfSlot = matchInfo.localMatchPlayerId();
 
-        // Default to spawn coords until the first snapshot arrives
+        // Default to spawn cords until the first snapshot arrives
         float selfX = matchInfo.spawnX();
         float selfY = matchInfo.spawnY();
-        for (NetworkClient.SnapshotPlayer p : snap) {
+
+        for (int i = 0; i < snap.size(); i++) {
+            NetworkClient.SnapshotPlayer p = snap.get(i);
+            int id = p.entityId() & 0xff;
+            RenderEntity re = renderEntities[id];
+
+//             Smooth movement (Lerp)
+            if (!re.initialized) {
+                re.x = p.x(); re.y = p.y(); re.initialized = true;
+            } else {
+                float alpha = 1f - (float) Math.exp(-20f * delta); // 20 matches server Hz
+                re.x = MathUtils.lerp(re.x, p.x(), alpha);
+                re.y = MathUtils.lerp(re.y, p.y(), alpha);
+            }
+
             if (p.entityId() == selfSlot) {
-                selfX = p.x();
-                selfY = p.y();
-                break;
+                selfX = re.x;
+                selfY = re.y;
+            } else {
+                // Spawn enemy bullets
+                otherFireCooldown[id] -= delta;
+                if (p.anim() == 3 && otherFireCooldown[id] <= 0f) {
+                    otherFireCooldown[id] = FIRE_RATE;
+                    bullets.add(new Bullet(
+                            re.x, re.y,
+                            MathUtils.cos(p.aimRadians()) * BULLET_SPEED,
+                            MathUtils.sin(p.aimRadians()) * BULLET_SPEED));
+                }
             }
         }
+
 
         // ── 3. Compute aim angle from mouse in world coords ───────────────────
         scratch.set(Gdx.input.getX(), Gdx.input.getY(), 0f);
@@ -247,6 +282,7 @@ public final class GameScreen implements Screen {
             if (bullets.get(i).update(delta)) bullets.removeIndex(i);
         }
 
+
         // ── 6. Collision detection (visual highlight, server handles pushback) ─
         // Build a boolean array — index matches snap.get(i).
         int snapSize = snap.size();
@@ -263,6 +299,8 @@ public final class GameScreen implements Screen {
                 }
             }
         }
+
+
 
         // ── 7. Clear ──────────────────────────────────────────────────────────
         Gdx.gl.glClearColor(0.07f, 0.09f, 0.07f, 1f);
@@ -309,24 +347,28 @@ public final class GameScreen implements Screen {
             shapes.circle(b.x, b.y, BULLET_RADIUS, 8);
         }
 
+
         // Players from server snapshot
         for (int i = 0; i < snapSize; i++) {
             NetworkClient.SnapshotPlayer p = snap.get(i);
             boolean isSelf = (p.entityId() == selfSlot);
+            int id = p.entityId() & 0xff;
+            RenderEntity re = renderEntities[id];
 
             // Body colour: orange-red if in collision, else yellow (self) / blue (other)
             Color bodyColor = colliding[i] ? COLOR_COLLIDE : (isSelf ? COLOR_SELF : COLOR_OTHER);
-            float radius    = isSelf ? PLAYER_RADIUS : PLAYER_RADIUS - 1f;
+            float radius = PLAYER_RADIUS; // Removed the -1f size difference
 
             shapes.setColor(bodyColor);
-            shapes.circle(p.x(), p.y(), radius, 20);
+            // Draw using the smoothed position (re.x, re.y) instead of raw network positions
+            shapes.circle(re.x, re.y, radius, 20);
 
             // Aim indicator only for the local player
             if (isSelf) {
-                float tipX = p.x() + MathUtils.cos(aimAngle) * (PLAYER_RADIUS + AIM_LINE_EXTRA);
-                float tipY = p.y() + MathUtils.sin(aimAngle) * (PLAYER_RADIUS + AIM_LINE_EXTRA);
+                float tipX = re.x + MathUtils.cos(aimAngle) * (PLAYER_RADIUS + AIM_LINE_EXTRA);
+                float tipY = re.y + MathUtils.sin(aimAngle) * (PLAYER_RADIUS + AIM_LINE_EXTRA);
                 shapes.setColor(COLOR_AIM);
-                shapes.rectLine(p.x(), p.y(), tipX, tipY, 3f);
+                shapes.rectLine(re.x, re.y, tipX, tipY, 3f);
             }
         }
 

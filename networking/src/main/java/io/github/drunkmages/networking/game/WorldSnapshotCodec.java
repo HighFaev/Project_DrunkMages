@@ -40,7 +40,7 @@ final class WorldSnapshotCodec {
             payload.writeShort(0); // shield
             payload.writeShort(0); // max shield
             payload.writeByte(0); // held slot
-            payload.writeByte(0); // anim
+            payload.writeByte(ps.isShooting ? 3 : 0); // anim
             payload.writeByte(0); // inv weapon 0
             payload.writeByte(0);
             payload.writeByte(0); // ammo
