@@ -34,7 +34,7 @@ final class WorldSnapshotCodec {
             payload.writeFloat(ps.posX);
             payload.writeFloat(ps.posY);
             payload.writeFloat(ps.aimAngle);
-            payload.writeByte(0); // alive
+            payload.writeByte(ps.hp > 0 ? 0 : 2); // alive
             payload.writeShort(ps.hp);
             payload.writeShort(ps.maxHp);
             payload.writeShort(0); // shield

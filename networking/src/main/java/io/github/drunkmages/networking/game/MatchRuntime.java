@@ -55,7 +55,8 @@ public final class MatchRuntime {
      * of each wall sits at ±136.  Subtracting the player radius gives the
      * furthest centre position that keeps the circle fully inside.
      */
-    private static final float ARENA_BOUND = 136f - PLAYER_RADIUS; // = 129
+    public static final float ARENA_HALF = 400f;
+    private static final float ARENA_BOUND = (ARENA_HALF - 4f) - PLAYER_RADIUS; // = 129
 
     // ── Match identity ───────────────────────────────────────────────────────
 
@@ -229,6 +230,13 @@ public final class MatchRuntime {
      * it ignores client-predicted position ({@code pos_x}/{@code pos_y}).
      */
     private static void applyMotion(PlayerSimState ps, ClientInputPayload in) {
+        if (ps.hp <= 0) {
+            ps.velX = 0f;
+            ps.velY = 0f;
+            ps.isShooting = false;
+            return;
+        }
+
         float aim = ps.aimAngle;
         float vx  = 0f;
         float vy  = 0f;
@@ -340,4 +348,14 @@ public final class MatchRuntime {
         float k = (float) (MAX_SPEED / mag);
         return new float[]{ rawVx * k, rawVy * k };
     }
+    public void disconnectPlayer(int entityId) {
+        PlayerSimState ps = lookup(entityId);
+        if (ps != null) {
+            ps.hp = 0;             // Kill the player
+            ps.isShooting = false; // Force stop shooting
+            latestInputs.remove(entityId); // Clear their sticky inputs
+            udpBoundSlot[entityId] = null; // Free their UDP slot
+        }
+    }
+
 }

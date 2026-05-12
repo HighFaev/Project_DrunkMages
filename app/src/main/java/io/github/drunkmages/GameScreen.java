@@ -60,7 +60,7 @@ public final class GameScreen implements Screen {
     /** Orthographic viewport height in server world-units. */
     private static final float VIEW_HEIGHT = 220f;
     /** Half-extent of the server arena (walls at ±ARENA_HALF). */
-    private static final float ARENA_HALF  = 140f;
+    private static final float ARENA_HALF  = 400f;
     private static final float ARENA_SIZE  = ARENA_HALF * 2f;   // 280
 
     // ── Decorative checkerboard grid ─────────────────────────────────────────
@@ -219,6 +219,7 @@ public final class GameScreen implements Screen {
 
         for (int i = 0; i < snap.size(); i++) {
             NetworkClient.SnapshotPlayer p = snap.get(i);
+            if (p.hp() <= 0) continue;
             int id = p.entityId() & 0xff;
             RenderEntity re = renderEntities[id];
 
@@ -288,7 +289,9 @@ public final class GameScreen implements Screen {
         int snapSize = snap.size();
         boolean[] colliding = new boolean[snapSize];
         for (int i = 0; i < snapSize; i++) {
+            if (snap.get(i).hp() <= 0) continue;
             for (int j = i + 1; j < snapSize; j++) {
+                if (snap.get(j).hp() <= 0) continue;
                 NetworkClient.SnapshotPlayer a = snap.get(i);
                 NetworkClient.SnapshotPlayer b = snap.get(j);
                 float dx = b.x() - a.x();
@@ -351,6 +354,7 @@ public final class GameScreen implements Screen {
         // Players from server snapshot
         for (int i = 0; i < snapSize; i++) {
             NetworkClient.SnapshotPlayer p = snap.get(i);
+            if (p.hp() <= 0) continue;
             boolean isSelf = (p.entityId() == selfSlot);
             int id = p.entityId() & 0xff;
             RenderEntity re = renderEntities[id];

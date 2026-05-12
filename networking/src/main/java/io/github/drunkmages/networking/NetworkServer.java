@@ -825,6 +825,10 @@ public final class NetworkServer {
 
                 broadcastRoster();
 
+                MatchRuntime rt = ARENA_REF.get();
+                if (rt != null && left.slot > 0 && UDP != null) {
+                    UDP.eventLoop().execute(() -> rt.disconnectPlayer(left.slot));
+                }
 
                 shutdownArenaIfNobodyOnline();
 
