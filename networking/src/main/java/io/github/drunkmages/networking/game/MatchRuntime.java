@@ -15,47 +15,77 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Authoritative simulation for one match instance. Intended to be driven only from the
- * {@link Channel#eventLoop()} that owns the UDP transport (single-threaded execution).
+ * Authoritative simulation for one match instance.
+ *
+ * <p>Intended to be driven only from the {@link Channel#eventLoop()} that
+ * owns the UDP transport (single-threaded execution — no locks needed).
+ *
+ * <h3>Player physics</h3>
+ * <ol>
+ *   <li>Apply client-driven motion ({@link #applyMotion}).</li>
+ *   <li>Clamp each player to the arena boundary ({@link #clampToArena}).</li>
+ *   <li>Resolve player-vs-player circle collisions ({@link #resolvePlayerCollisions}).</li>
+ *   <li>Re-clamp after collision resolution to prevent wall-escape.</li>
+ * </ol>
  */
 public final class MatchRuntime {
 
-    /** Spec §10: provisional speed cap pending full collision / stamina systems. */
+    // ── Physics constants ────────────────────────────────────────────────────
 
+    /** §10: provisional top speed cap. */
     static final float MAX_SPEED = 42f;
 
     private static final float TICK_DELTA = 0.05f;
 
-    private final int matchWireSignedInt;
+    /**
+     * Physical radius used for both wall clamping and player-vs-player
+     * circle collision.  Must match the visual radius rendered by the client.
+     */
+    private static final float PLAYER_RADIUS = 7f;
 
+    /**
+     * Minimum distance between two player centres before pushback triggers.
+     * Equals the sum of their radii (both are the same size).
+     */
+    private static final float PLAYER_MIN_DIST = PLAYER_RADIUS * 2f;
+
+    /**
+     * Inner playable half-extent of the arena.
+     * Walls are 4 units thick inside the ±140 boundary, so the inner edge
+     * of each wall sits at ±136.  Subtracting the player radius gives the
+     * furthest centre position that keeps the circle fully inside.
+     */
+    private static final float ARENA_BOUND = 136f - PLAYER_RADIUS; // = 129
+
+    // ── Match identity ───────────────────────────────────────────────────────
+
+    private final int  matchWireSignedInt;
     private final long assignedMatchUnsignedLong;
+
+    // ── Simulation state ─────────────────────────────────────────────────────
 
     private volatile int authoritativeTick;
 
     /** Monotonic server-authored UDP sequence numbers for downlink frames. */
-
     private int outboundSeqCounter;
 
     private final int maxEntityId;
 
     /** Dense iteration order mirroring MATCH roster order. */
-
     private final PlayerSimState[] rosterOrdered;
 
     /** Random access indexed by entity id. */
-
     private final PlayerSimState[] byEntityId;
 
-    private final InetAddress[] tcpGate;
-
+    private final InetAddress[]       tcpGate;
     private final InetSocketAddress[] udpBoundSlot;
 
-    private final HashMap<Integer, Integer> lastSeqByEntity = new HashMap<>();
+    private final HashMap<Integer, Integer>          lastSeqByEntity = new HashMap<>();
+    private final HashMap<Integer, ClientInputPayload> latestInputs  = new HashMap<>();
 
-    private final HashMap<Integer, ClientInputPayload> latestInputs = new HashMap<>();
+    // ── Constructor ──────────────────────────────────────────────────────────
 
     public MatchRuntime(int matchWireSignedInt, List<MatchParticipant> rosterUnsorted) {
-
         Objects.requireNonNull(rosterUnsorted);
 
         List<MatchParticipant> roster =
@@ -63,248 +93,163 @@ public final class MatchRuntime {
                         .sorted(Comparator.comparingInt(MatchParticipant::matchLocalPlayerId))
                         .toList();
 
-        if (roster.isEmpty()) {
-            throw new IllegalArgumentException("empty roster");
-        }
+        if (roster.isEmpty()) throw new IllegalArgumentException("empty roster");
 
-        maxEntityId = roster.stream().mapToInt(MatchParticipant::matchLocalPlayerId).max().orElseThrow();
+        maxEntityId = roster.stream()
+                .mapToInt(MatchParticipant::matchLocalPlayerId)
+                .max()
+                .orElseThrow();
 
-        this.matchWireSignedInt = matchWireSignedInt;
+        this.matchWireSignedInt       = matchWireSignedInt;
+        this.assignedMatchUnsignedLong = Integer.toUnsignedLong(matchWireSignedInt);
 
-        assignedMatchUnsignedLong = Integer.toUnsignedLong(matchWireSignedInt);
-
-        byEntityId = new PlayerSimState[maxEntityId + 1];
-
+        byEntityId   = new PlayerSimState[maxEntityId + 1];
         rosterOrdered = new PlayerSimState[roster.size()];
-
-        tcpGate = new InetAddress[maxEntityId + 1];
-
+        tcpGate      = new InetAddress[maxEntityId + 1];
         udpBoundSlot = new InetSocketAddress[maxEntityId + 1];
 
         int ox = 0;
-
         for (MatchParticipant mp : roster) {
-
-            int eid = mp.matchLocalPlayerId();
-
+            int eid   = mp.matchLocalPlayerId();
             InetAddress ipa = Objects.requireNonNull(mp.tcpRemoteIp(), "TCP remote IP");
-
             PlayerSimState st = new PlayerSimState(eid, mp.spawnX(), mp.spawnY());
-
             rosterOrdered[ox++] = st;
-
-            byEntityId[eid] = st;
-
-            tcpGate[eid] = ipa;
-
-            udpBoundSlot[eid] = null;
+            byEntityId[eid]     = st;
+            tcpGate[eid]        = ipa;
+            udpBoundSlot[eid]   = null;
         }
-
-        lastSeqByEntity.clear();
     }
 
     public int signedMatchBits() {
-
         return matchWireSignedInt;
     }
 
-    /** Integrate snapshots + multicast WORLD_SNAPSHOT to every bound UDP endpoint. */
+    // ── Tick loop ─────────────────────────────────────────────────────────────
 
+    /**
+     * Advances the simulation by one tick, resolves physics, then multicasts
+     * a {@code WORLD_SNAPSHOT} to every bound UDP endpoint.
+     *
+     * <p>Must be called exclusively from the UDP channel's event loop.
+     */
     public void advanceAndMulticast(Channel udpChannel) {
-
         authoritativeTick++;
 
+        // 1. Apply client-driven motion
         for (PlayerSimState ps : rosterOrdered) {
-
-            ClientInputPayload pending = latestInputs.get(ps.entityId);
-
-            applyMotion(ps, pending);
+            applyMotion(ps, latestInputs.get(ps.entityId));
         }
 
+        // 2. Clamp each player to arena walls
+        for (PlayerSimState ps : rosterOrdered) {
+            clampToArena(ps);
+        }
+
+        // 3. Resolve player-vs-player circle collisions (iterative, single pass)
+        resolvePlayerCollisions();
+
+        // 4. Re-clamp after pushback in case a collision pushed someone into a wall
+        for (PlayerSimState ps : rosterOrdered) {
+            clampToArena(ps);
+        }
+
+        // 5. Build and multicast WORLD_SNAPSHOT
         outboundSeqCounter++;
-
-        ByteBuf snap =
-                WorldSnapshotCodec.encode(
-                        udpChannel.alloc(),
-                        outboundSeqCounter,
-
-                        authoritativeTick,
-
-                        signedMatchBits(),
-
-                        rosterOrdered);
-
+        ByteBuf snap = WorldSnapshotCodec.encode(
+                udpChannel.alloc(),
+                outboundSeqCounter,
+                authoritativeTick,
+                signedMatchBits(),
+                rosterOrdered);
 
         for (int eid = 1; eid <= maxEntityId; eid++) {
-
             InetSocketAddress dest = udpBoundSlot[eid];
-
-            if (dest == null) {
-                continue;
-            }
-
+            if (dest == null) continue;
             udpChannel.write(new DatagramPacket(snap.retainedDuplicate(), dest));
         }
 
-
         udpChannel.flush();
-
         snap.release();
     }
 
+    // ── Ingress (client → server) ─────────────────────────────────────────────
 
     /** @return {@code true} once a valid INPUT was stored */
-
     public boolean ingest(InetSocketAddress sender, ByteBuf content) {
-
-
         boolean release = true;
-
         try {
-
             final int INPUT_TAIL = 4 * 5 + 2;
-
-
             int need = UdpOpcodes.HEADER_BYTES + INPUT_TAIL;
-
-            if (!content.isReadable(need)) {
-
-
-                return false;
-            }
-
+            if (!content.isReadable(need)) return false;
 
             UdpHeader header = UdpHeader.read(content);
-
-            if (header.matchIdUnsigned() != assignedMatchUnsignedLong) {
-
-
-                return false;
-            }
-
+            if (header.matchIdUnsigned() != assignedMatchUnsignedLong) return false;
 
             int entityId = header.playerIdUnsigned();
-
-
             PlayerSimState ent = lookup(entityId);
-
-            if (ent == null) {
-
-                return false;
-            }
-
+            if (ent == null) return false;
 
             InetAddress expected = tcpGate[entityId];
+            if (expected == null || !expected.equals(sender.getAddress())) return false;
 
-            if (expected == null || !expected.equals(sender.getAddress())) {
+            if (header.type() != UdpOpcodes.C_INPUT) return false;
 
-                return false;
-            }
-
-
-            if (header.type() != UdpOpcodes.C_INPUT) {
-
-                return false;
-            }
-
-
-            int seq = header.seqUnsigned();
-
-            Integer previous = lastSeqByEntity.get(entityId);
-
-            if (previous != null && Integer.compareUnsigned(seq, previous) <= 0) {
-
-                return false;
-            }
-
+            int seq      = header.seqUnsigned();
+            Integer prev = lastSeqByEntity.get(entityId);
+            if (prev != null && Integer.compareUnsigned(seq, prev) <= 0) return false;
             lastSeqByEntity.put(entityId, seq);
 
             InetSocketAddress lock = udpBoundSlot[entityId];
-
             if (lock == null) {
-
                 udpBoundSlot[entityId] = sender;
             } else if (!lock.equals(sender)) {
-
                 return false;
             }
 
-            /* predicted client position — ignored for authority */
-
+            // predicted client position — ignored for authority
             content.skipBytes(8);
+            float vx      = content.readFloat();
+            float vy      = content.readFloat();
+            float aim     = content.readFloat();
+            int   btns    = content.readUnsignedByte();
+            int   inSeq   = content.readUnsignedByte();
 
-            float vx = content.readFloat();
-
-            float vy = content.readFloat();
-
-            float aim = content.readFloat();
-
-            int buttons = content.readUnsignedByte();
-
-            int inSeq = content.readUnsignedByte();
-
-            latestInputs.put(
-                    entityId,
-                    new ClientInputPayload(vx, vy, aim, buttons, inSeq));
-
+            latestInputs.put(entityId, new ClientInputPayload(vx, vy, aim, btns, inSeq));
             return true;
-        }
-
-        finally {
-
-            if (release) {
-
-                content.release();
-            }
+        } finally {
+            if (release) content.release();
         }
     }
 
-    private PlayerSimState lookup(int entityId) {
+    // ── Physics helpers ───────────────────────────────────────────────────────
 
-        if (entityId < 0 || entityId > maxEntityId) {
-            return null;
-        }
-
-        return byEntityId[entityId];
-    }
-
+    /**
+     * Integrates one player's position from the latest client input.
+     * The server trusts velocity magnitude (capped) and button bits;
+     * it ignores client-predicted position ({@code pos_x}/{@code pos_y}).
+     */
     private static void applyMotion(PlayerSimState ps, ClientInputPayload in) {
-
         float aim = ps.aimAngle;
-
-        float vx = 0f;
-
-        float vy = 0f;
+        float vx  = 0f;
+        float vy  = 0f;
 
         if (in != null) {
-
             aim = in.aimAngle();
-
             float rawVx = in.velX();
-
             float rawVy = in.velY();
 
             if (Math.hypot(rawVx, rawVy) <= 1e-4f && in.buttons() != 0) {
-
-                float sp = MAX_SPEED * 0.85f;
-
-                boolean up = bit(in.buttons(), 0);
-
-                boolean down = bit(in.buttons(), 1);
-
-                boolean left = bit(in.buttons(), 2);
-
+                // Client sent no velocity — derive from button bitmask
+                float sp     = MAX_SPEED * 0.85f;
+                boolean up    = bit(in.buttons(), 0);
+                boolean down  = bit(in.buttons(), 1);
+                boolean left  = bit(in.buttons(), 2);
                 boolean right = bit(in.buttons(), 3);
-
-                vx = ((right ? 1 : 0) - (left ? 1 : 0)) * sp;
-
-                vy = -((up ? 1 : 0) - (down ? 1 : 0)) * sp;
+                vx =  ((right ? 1 : 0) - (left ? 1 : 0)) * sp;
+                vy = -((up    ? 1 : 0) - (down ? 1 : 0)) * sp;
             } else {
-
                 float[] cap = capped(rawVx, rawVy);
-
                 vx = cap[0];
-
                 vy = cap[1];
             }
         }
@@ -312,22 +257,86 @@ public final class MatchRuntime {
         ps.integrate(TICK_DELTA, vx, vy, aim);
     }
 
-    private static boolean bit(int mask, int bit) {
+    /**
+     * Clamps a player's centre position so they cannot pass through the
+     * arena walls.  The inner edge of each wall is at ±(ARENA_HALF − 4),
+     * so the player centre must stay within ±ARENA_BOUND.
+     */
+    private static void clampToArena(PlayerSimState ps) {
+        if (ps.posX < -ARENA_BOUND) { ps.posX = -ARENA_BOUND; ps.velX = 0f; }
+        if (ps.posX >  ARENA_BOUND) { ps.posX =  ARENA_BOUND; ps.velX = 0f; }
+        if (ps.posY < -ARENA_BOUND) { ps.posY = -ARENA_BOUND; ps.velY = 0f; }
+        if (ps.posY >  ARENA_BOUND) { ps.posY =  ARENA_BOUND; ps.velY = 0f; }
+    }
 
+    /**
+     * Single-pass O(n²) circle-circle pushback.
+     *
+     * <p>When two player circles overlap, each is pushed halfway out of the
+     * other along the centre-to-centre axis.  This is not perfectly stable
+     * under heavy pile-ups (would need iteration), but is correct and cheap
+     * for the expected 2–20 player count.
+     */
+    private void resolvePlayerCollisions() {
+        int n = rosterOrdered.length;
+        for (int i = 0; i < n - 1; i++) {
+            for (int j = i + 1; j < n; j++) {
+                PlayerSimState a = rosterOrdered[i];
+                PlayerSimState b = rosterOrdered[j];
+
+                float dx     = b.posX - a.posX;
+                float dy     = b.posY - a.posY;
+                float distSq = dx * dx + dy * dy;
+
+                if (distSq >= PLAYER_MIN_DIST * PLAYER_MIN_DIST || distSq < 1e-6f) {
+                    continue; // no overlap, or coincident (avoid div-by-zero)
+                }
+
+                float dist    = (float) Math.sqrt(distSq);
+                float overlap = PLAYER_MIN_DIST - dist;
+
+                // Unit normal from a → b
+                float nx = dx / dist;
+                float ny = dy / dist;
+
+                // Push each player half the overlap distance
+                float half = overlap * 0.5f;
+                a.posX -= nx * half;
+                a.posY -= ny * half;
+                b.posX += nx * half;
+                b.posY += ny * half;
+
+                // Cancel velocity components pushing into the collision
+                // (prevents tunnelling through at high speed)
+                float relVx = b.velX - a.velX;
+                float relVy = b.velY - a.velY;
+                float dot   = relVx * nx + relVy * ny;
+                if (dot < 0f) {
+                    // Project out the approaching component (elastic-ish, mass = 1 each)
+                    a.velX -= nx * (-dot * 0.5f);
+                    a.velY -= ny * (-dot * 0.5f);
+                    b.velX += nx * (-dot * 0.5f);
+                    b.velY += ny * (-dot * 0.5f);
+                }
+            }
+        }
+    }
+
+    // ── Utilities ─────────────────────────────────────────────────────────────
+
+    private PlayerSimState lookup(int entityId) {
+        if (entityId < 0 || entityId > maxEntityId) return null;
+        return byEntityId[entityId];
+    }
+
+    private static boolean bit(int mask, int bit) {
         return ((mask >>> bit) & 1) != 0;
     }
 
     private static float[] capped(float rawVx, float rawVy) {
-
         double mag = Math.hypot(rawVx, rawVy);
-
-        if (mag <= MAX_SPEED || mag < 1e-6) {
-
-            return new float[] { rawVx, rawVy };
-        }
-
+        if (mag <= MAX_SPEED || mag < 1e-6) return new float[]{ rawVx, rawVy };
         float k = (float) (MAX_SPEED / mag);
-
-        return new float[] { rawVx * k, rawVy * k };
+        return new float[]{ rawVx * k, rawVy * k };
     }
 }
