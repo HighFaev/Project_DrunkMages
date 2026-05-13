@@ -245,6 +245,18 @@ public final class MatchRuntime {
             InetAddress expected = tcpGate[entityId];
             if (expected == null || !expected.equals(sender.getAddress())) return false;
 
+            if (header.type() == UdpOpcodes.C_RELOAD) {
+                if (ent.hp <= 0) {
+                    ent.hp = ent.maxHp;
+                    // Respawn at a random location near the center
+                    ent.posX = (float) ((Math.random() - 0.5) * 200f);
+                    ent.posY = (float) ((Math.random() - 0.5) * 200f);
+                    ent.velX = 0f;
+                    ent.velY = 0f;
+                }
+                return true;
+            }
+
             if (header.type() != UdpOpcodes.C_INPUT) return false;
 
             int seq      = header.seqUnsigned();

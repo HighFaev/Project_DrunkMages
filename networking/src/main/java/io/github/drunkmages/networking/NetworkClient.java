@@ -535,8 +535,21 @@ public final class NetworkClient {
             }
 
 
-        }
 
+
+        }
+        public void sendRespawnRequest() {
+            Channel z = cannon_;
+            InetSocketAddress bull = aim_;
+            if (!active.get() || z == null || !z.isActive() || bull == null) {
+                return;
+            }
+            seqOutbound_++;
+            ByteBuf buf = z.alloc().buffer(UdpOpcodes.HEADER_BYTES);
+            // Hijack C_RELOAD to act as the respawn signal
+            UdpHeader.write(buf, UdpOpcodes.C_RELOAD, seqOutbound_, 0, warriorSlot_, matchXor_);
+            z.writeAndFlush(new DatagramPacket(buf, bull));
+        }
 
         /**
          * §5 WORLD_SNAPSHOT — header, HUD fields, and MVP player positions (matches {@code WorldSnapshotCodec}).

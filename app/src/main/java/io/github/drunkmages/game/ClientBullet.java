@@ -4,9 +4,11 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 
 public class ClientBullet {
     public float x, y, vx, vy, life;
+    public int ownerId;
 
-    public ClientBullet(float x, float y, float vx, float vy) {
+    public ClientBullet(float x, float y, float vx, float vy, int ownerId) {
         this.x = x; this.y = y; this.vx = vx; this.vy = vy;
+        this.ownerId = ownerId;
         this.life = GameConstants.BULLET_LIFETIME;
     }
 

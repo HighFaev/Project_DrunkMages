@@ -101,7 +101,8 @@ public final class GameScreen implements Screen {
             hud.addKillFeedEvent(death.victimNickname(), death.killerNickname());
             if (death.playerId() == matchInfo.localMatchPlayerId()) {
                 hud.showDeathScreen(death.killerNickname(), () -> {
-                    hud.hideDeathScreen(); // Dummy respawn function (hides UI)
+                    hud.hideDeathScreen();
+                    game.udp.sendRespawnRequest();// Dummy respawn function (hides UI)
                 }, () -> game.disconnect());
             }
         }
@@ -141,7 +142,8 @@ public final class GameScreen implements Screen {
                     bullets.add(new ClientBullet(
                             players[id].x, players[id].y,
                             MathUtils.cos(p.aimRadians()) * GameConstants.BULLET_SPEED,
-                            MathUtils.sin(p.aimRadians()) * GameConstants.BULLET_SPEED));
+                            MathUtils.sin(p.aimRadians()) * GameConstants.BULLET_SPEED,
+                            id));
                 }
             }
         }
@@ -168,12 +170,40 @@ public final class GameScreen implements Screen {
             myFireCooldown = GameConstants.FIRE_RATE;
             bullets.add(new ClientBullet(myX, myY,
                     MathUtils.cos(myAimAngle) * GameConstants.BULLET_SPEED,
-                    MathUtils.sin(myAimAngle) * GameConstants.BULLET_SPEED));
+                    MathUtils.sin(myAimAngle) * GameConstants.BULLET_SPEED,
+                    me.id)); // PASS ownerId HERE
         }
 
-        // Update all bullets and remove dead ones
+        // Update all bullets and remove dead/collided ones
         for (int i = bullets.size - 1; i >= 0; i--) {
-            if (bullets.get(i).update(delta)) bullets.removeIndex(i);
+            ClientBullet b = bullets.get(i);
+
+            // If it flew off-map or ran out of life, remove it
+            if (b.update(delta)) {
+                bullets.removeIndex(i);
+                continue;
+            }
+
+            // Check collision with players
+            boolean hit = false;
+            for (ClientPlayer p : players) {
+                // Don't collide with dead players, uninitialized slots, or the shooter themselves
+                if (p != null && p.hp > 0 && p.id != b.ownerId) {
+                    float dx = p.x - b.x;
+                    float dy = p.y - b.y;
+
+                    // Same collision math (14f) used on the server
+                    if (dx * dx + dy * dy < 14f * 14f) {
+                        hit = true;
+                        break;
+                    }
+                }
+            }
+
+            // Disappear if it hit someone
+            if (hit) {
+                bullets.removeIndex(i);
+            }
         }
     }
 
