@@ -89,4 +89,17 @@ final class LobbyTcpOutbound {
         b.writeByte(TcpOpcodes.C_PLAYER_LEAVE_LOBBY);
         return b;
     }
+
+    static ByteBuf playerDied(ByteBufAllocator alloc, int victimId, String victimNick, int killerId, String killerNick, int placement) {
+        String vNickSafe = victimNick == null ? "" : victimNick;
+        String kNickSafe = killerNick == null ? "" : killerNick;
+        var b = alloc.buffer(16 + vNickSafe.length() * 4 + kNickSafe.length() * 4);
+        b.writeByte(TcpOpcodes.S_PLAYER_DIED_TCP);
+        b.writeShort(victimId);
+        Wire.writeStr(b, vNickSafe);
+        b.writeShort(killerId);
+        Wire.writeStr(b, kNickSafe);
+        b.writeByte(placement);
+        return b;
+    }
 }

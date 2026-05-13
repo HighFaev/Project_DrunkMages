@@ -113,23 +113,18 @@ final class TcpFromServerDecoder extends ByteToMessageDecoder {
     }
 
     private static void decodePlayerDied(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) {
-        if (in.readableBytes() < 2 + 2 + 1 + 2) {
-            rewind(in);
-            return;
-        }
+        in.markReaderIndex();
+        if (in.readableBytes() < 4) return;
         int victim = in.readUnsignedShort();
+        String victimNick = readStrFully(ctx, in);
+        if (victimNick == null) { rewind(in); return; }
+        if (in.readableBytes() < 2) { rewind(in); return; }
         int killer = in.readUnsignedShort();
         String killerNick = readStrFully(ctx, in);
-        if (killerNick == null) {
-            rewind(in);
-            return;
-        }
-        if (in.readableBytes() < 1) {
-            rewind(in);
-            return;
-        }
+        if (killerNick == null) { rewind(in); return; }
+        if (in.readableBytes() < 1) { rewind(in); return; }
         int placement = in.readUnsignedByte();
-        out.add(new PlayerDiedTcpPacket(victim, killer, killerNick, placement));
+        out.add(new PlayerDiedTcpPacket(victim, victimNick, killer, killerNick, placement));
     }
 
     private static void decodeMatchEnd(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) {

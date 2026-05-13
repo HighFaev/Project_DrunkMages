@@ -20,11 +20,11 @@ import com.badlogic.gdx.utils.viewport.ScreenViewport;
 
 /**
  * The first screen the player sees.  Three fields:
- *
+
  *   Host      — IP or hostname of the server machine
  *   Port      — default 25565
  *   Nickname  — display name (validated non-blank, ≤ 32 chars)
- *
+
  * Hitting Enter in any field, or clicking Connect, calls
  * {@link LobbyGame#connect(String, int, String)}.
  */

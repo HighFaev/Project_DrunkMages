@@ -13,6 +13,8 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
+import java.util.ArrayList;
+import java.util.function.BiConsumer;
 
 /**
  * Authoritative simulation for one match instance.
@@ -84,9 +86,17 @@ public final class MatchRuntime {
     private final HashMap<Integer, Integer>          lastSeqByEntity = new HashMap<>();
     private final HashMap<Integer, ClientInputPayload> latestInputs  = new HashMap<>();
 
+    private static final class ServerProjectile {
+        float x, y, vx, vy, life;
+        int ownerId;
+    }
+    private final ArrayList<ServerProjectile> serverProjectiles = new ArrayList<>();
+    private final BiConsumer<Integer, Integer> onDeath;
+
     // ── Constructor ──────────────────────────────────────────────────────────
 
-    public MatchRuntime(int matchWireSignedInt, List<MatchParticipant> rosterUnsorted) {
+    public MatchRuntime(int matchWireSignedInt, List<MatchParticipant> rosterUnsorted, BiConsumer<Integer, Integer> onDeath) {
+        this.onDeath = onDeath;
         Objects.requireNonNull(rosterUnsorted);
 
         List<MatchParticipant> roster =
@@ -134,6 +144,48 @@ public final class MatchRuntime {
      * <p>Must be called exclusively from the UDP channel's event loop.
      */
     public void advanceAndMulticast(Channel udpChannel) {
+        for (PlayerSimState ps : rosterOrdered) {
+            if (ps.hp <= 0) continue;
+            ps.fireCooldown -= TICK_DELTA;
+            if (ps.isShooting && ps.fireCooldown <= 0f) {
+                ps.fireCooldown = 0.22f; // FIRE_RATE
+                ServerProjectile p = new ServerProjectile();
+                p.x = ps.posX; p.y = ps.posY;
+                p.vx = (float) Math.cos(ps.aimAngle) * 240f;
+                p.vy = (float) Math.sin(ps.aimAngle) * 240f;
+                p.life = 2.5f;
+                p.ownerId = ps.entityId;
+                serverProjectiles.add(p);
+            }
+        }
+
+        // Projectile Step & Hit Detection
+        for (int i = serverProjectiles.size() - 1; i >= 0; i--) {
+            ServerProjectile p = serverProjectiles.get(i);
+            p.x += p.vx * TICK_DELTA;
+            p.y += p.vy * TICK_DELTA;
+            p.life -= TICK_DELTA;
+            boolean hit = false;
+
+            for (PlayerSimState target : rosterOrdered) {
+                if (target.hp <= 0 || target.entityId == p.ownerId) continue;
+                float dx = target.posX - p.x;
+                float dy = target.posY - p.y;
+                // Hitbox check (using 14f to make it feel generous/fair)
+                if (dx * dx + dy * dy < 14f * 14f) {
+                    target.hp -= 25; // 4 hits to kill
+                    hit = true;
+                    if (target.hp <= 0) {
+                        onDeath.accept(target.entityId, p.ownerId); // Notify death
+                    }
+                    break;
+                }
+            }
+            if (hit || p.life <= 0f || Math.abs(p.x) > ARENA_HALF || Math.abs(p.y) > ARENA_HALF) {
+                serverProjectiles.remove(i);
+            }
+        }
+
         authoritativeTick++;
 
         // 1. Apply client-driven motion

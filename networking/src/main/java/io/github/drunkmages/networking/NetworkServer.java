@@ -550,8 +550,18 @@ public final class NetworkServer {
         COUNTDOWN_RUNNING = false;
 
         stopTicker();
+        java.util.Map<Integer, String> slotToNick = new java.util.HashMap<>();
+        for (LobbyPeer p : participantChannels) slotToNick.put(p.slot, p.info.nickname());
 
-        MatchRuntime rt = new MatchRuntime(wireMidBits, mathsRoster);
+        MatchRuntime rt = new MatchRuntime(wireMidBits, mathsRoster, (victimId, killerId) -> {
+            String vNick = slotToNick.getOrDefault(victimId, "Unknown");
+            String kNick = killerId == 0 ? "Environment" : slotToNick.getOrDefault(killerId, "Unknown");
+            ByteBuf buf = LobbyTcpOutbound.playerDied(UDP.alloc(), victimId, vNick, killerId, kNick, 0);
+            for (LobbyPeer peer : participantChannels) {
+                peer.socket().writeAndFlush(buf.retainedDuplicate());
+            }
+            buf.release();
+        });
 
         ARENA_REF.set(rt);
 

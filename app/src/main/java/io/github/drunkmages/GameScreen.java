@@ -51,7 +51,7 @@ public final class GameScreen implements Screen {
         }
 
         // Initialize HUD with a callback for the Leave button
-        this.hud = new GameHUD(() -> game.disconnect());
+        this.hud = new GameHUD(game::disconnect);
     }
 
     @Override
@@ -94,6 +94,17 @@ public final class GameScreen implements Screen {
         for (ClientPlayer p : players) p.draw(shapes, myAimAngle);
 
         shapes.end();
+
+        // Handle Death Events
+        io.github.drunkmages.networking.PlayerDiedTcpPacket death;
+        while ((death = game.deathEvents.poll()) != null) {
+            hud.addKillFeedEvent(death.victimNickname(), death.killerNickname());
+            if (death.playerId() == matchInfo.localMatchPlayerId()) {
+                hud.showDeathScreen(death.killerNickname(), () -> {
+                    hud.hideDeathScreen(); // Dummy respawn function (hides UI)
+                }, () -> game.disconnect());
+            }
+        }
 
         // 3. Draw HUD
         updateHUD();

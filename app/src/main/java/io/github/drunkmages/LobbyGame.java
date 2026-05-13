@@ -5,6 +5,7 @@ import io.github.drunkmages.common.PlayerInfo;
 import io.github.drunkmages.networking.MatchFoundPacket;
 import io.github.drunkmages.networking.MatchStartPacket;
 import io.github.drunkmages.networking.NetworkClient;
+import io.github.drunkmages.networking.PlayerDiedTcpPacket;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -23,6 +24,7 @@ public final class LobbyGame extends Game {
     /** Match countdown seconds from server; {@code -1} means no active countdown. */
     final AtomicInteger matchCountdownSec = new AtomicInteger(-1);
     final AtomicReference<MatchFoundPacket> pendingMatch = new AtomicReference<>();
+    public final java.util.Queue<PlayerDiedTcpPacket> deathEvents = new java.util.concurrent.ConcurrentLinkedQueue<>();
 
     final NetworkClient client = new NetworkClient();
     final NetworkClient.GameUdpClient udp = new NetworkClient.GameUdpClient();
@@ -62,6 +64,11 @@ public final class LobbyGame extends Game {
                     public void onWelcome(int lobbyAssignedId) {
                         myId.set(lobbyAssignedId);
                         status.set("Connected - when everyone is here, all press Ready.");
+                    }
+
+                    @Override
+                    public void onPlayerDied(PlayerDiedTcpPacket note) {
+                        deathEvents.add(note);
                     }
 
                     @Override

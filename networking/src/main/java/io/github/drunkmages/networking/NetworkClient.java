@@ -46,6 +46,7 @@ public final class NetworkClient {
 
         }
 
+        default void onPlayerDied(PlayerDiedTcpPacket note) {}
 
         default void onMatchFound(MatchFoundPacket note) {
 
@@ -945,6 +946,11 @@ public final class NetworkClient {
                 return;
 
 
+            }
+
+            if (frame instanceof PlayerDiedTcpPacket pd) {
+                ear_.onPlayerDied(pd);
+                return;
             }
 
 
