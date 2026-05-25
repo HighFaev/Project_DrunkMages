@@ -231,9 +231,7 @@ public final class MatchRuntime {
     public boolean ingest(InetSocketAddress sender, ByteBuf content) {
         boolean release = true;
         try {
-            final int INPUT_TAIL = 4 * 5 + 2;
-            int need = UdpOpcodes.HEADER_BYTES + INPUT_TAIL;
-            if (!content.isReadable(need)) return false;
+            if (!content.isReadable(UdpOpcodes.HEADER_BYTES)) return false;
 
             UdpHeader header = UdpHeader.read(content);
             if (header.matchIdUnsigned() != assignedMatchUnsignedLong) return false;
@@ -257,7 +255,8 @@ public final class MatchRuntime {
                 return true;
             }
 
-            if (header.type() != UdpOpcodes.C_INPUT) return false;
+            final int INPUT_TAIL = 4 * 5 + 2;
+            if (!content.isReadable(INPUT_TAIL)) return false;
 
             int seq      = header.seqUnsigned();
             Integer prev = lastSeqByEntity.get(entityId);
@@ -356,6 +355,9 @@ public final class MatchRuntime {
             for (int j = i + 1; j < n; j++) {
                 PlayerSimState a = rosterOrdered[i];
                 PlayerSimState b = rosterOrdered[j];
+
+                // fix, don't check collisions after player death (one of :))
+                if (a.hp <= 0 || b.hp <= 0) continue;
 
                 float dx     = b.posX - a.posX;
                 float dy     = b.posY - a.posY;
