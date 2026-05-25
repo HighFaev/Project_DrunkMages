@@ -86,12 +86,22 @@ public final class MatchRuntime {
     private final HashMap<Integer, Integer>          lastSeqByEntity = new HashMap<>();
     private final HashMap<Integer, ClientInputPayload> latestInputs  = new HashMap<>();
 
+    private final ZoneManager zone = new ZoneManager();
+
     private static final class ServerProjectile {
         float x, y, vx, vy, life;
         int ownerId;
     }
     private final ArrayList<ServerProjectile> serverProjectiles = new ArrayList<>();
     private final BiConsumer<Integer, Integer> onDeath;
+
+    public static final class ServerItem {
+        public int entityId;
+        public int itemType;
+        public float x, y;
+    }
+    private final ArrayList<ServerItem> groundItems = new ArrayList<>();
+    private int nextItemEntityId = 1000;
 
     // ── Constructor ──────────────────────────────────────────────────────────
 
@@ -129,6 +139,16 @@ public final class MatchRuntime {
             tcpGate[eid]        = ipa;
             udpBoundSlot[eid]   = null;
         }
+
+        for (int i = 0; i < 30; i++) {
+            ServerItem item = new ServerItem();
+            item.entityId = nextItemEntityId++;
+            item.itemType = Math.random() > 0.5 ? 3 : 4; // 50/50 Shotgun or AR
+            item.x = (float) ((Math.random() - 0.5) * (ARENA_HALF * 1.5));
+            item.y = (float) ((Math.random() - 0.5) * (ARENA_HALF * 1.5));
+            groundItems.add(item);
+        }
+
     }
 
     public int signedMatchBits() {
@@ -147,15 +167,22 @@ public final class MatchRuntime {
         for (PlayerSimState ps : rosterOrdered) {
             if (ps.hp <= 0) continue;
             ps.fireCooldown -= TICK_DELTA;
+
+            WeaponDef weapon = WeaponDef.get(ps.heldWeaponType);
+
             if (ps.isShooting && ps.fireCooldown <= 0f) {
-                ps.fireCooldown = 0.22f; // FIRE_RATE
-                ServerProjectile p = new ServerProjectile();
-                p.x = ps.posX; p.y = ps.posY;
-                p.vx = (float) Math.cos(ps.aimAngle) * 240f;
-                p.vy = (float) Math.sin(ps.aimAngle) * 240f;
-                p.life = 2.5f;
-                p.ownerId = ps.entityId;
-                serverProjectiles.add(p);
+                ps.fireCooldown = weapon.fireRate();
+                // Loop based on projectiles (Shotguns fire 5!)
+                for (int pCount = 0; pCount < weapon.projectiles(); pCount++) {
+                    ServerProjectile p = new ServerProjectile();
+                    p.x = ps.posX; p.y = ps.posY;
+                    float angle = ps.aimAngle + (float)((Math.random() - 0.5) * weapon.spreadRadians());
+                    p.vx = (float) Math.cos(angle) * weapon.bulletSpeed();
+                    p.vy = (float) Math.sin(angle) * weapon.bulletSpeed();
+                    p.life = 2.5f;
+                    p.ownerId = ps.entityId;
+                    serverProjectiles.add(p);
+                }
             }
         }
 
@@ -188,6 +215,17 @@ public final class MatchRuntime {
 
         authoritativeTick++;
 
+        zone.tick();
+        for (PlayerSimState ps : rosterOrdered) {
+            if (ps.hp <= 0) continue;
+            float dx = ps.posX - zone.curX;
+            float dy = ps.posY - zone.curY;
+            if (dx * dx + dy * dy > zone.curRadius * zone.curRadius) {
+                ps.hp -= zone.damagePerTick;
+                if (ps.hp <= 0) onDeath.accept(ps.entityId, 0); // 0 = Environment/Storm
+            }
+        }
+
         // 1. Apply client-driven motion
         for (PlayerSimState ps : rosterOrdered) {
             applyMotion(ps, latestInputs.get(ps.entityId));
@@ -213,12 +251,22 @@ public final class MatchRuntime {
                 outboundSeqCounter,
                 authoritativeTick,
                 signedMatchBits(),
-                rosterOrdered);
+                rosterOrdered,
+                groundItems);
 
         for (int eid = 1; eid <= maxEntityId; eid++) {
             InetSocketAddress dest = udpBoundSlot[eid];
             if (dest == null) continue;
             udpChannel.write(new DatagramPacket(snap.retainedDuplicate(), dest));
+        }
+
+        if (authoritativeTick % 20 == 0) {
+            ByteBuf zoneSnap = zone.encode(udpChannel.alloc(), outboundSeqCounter, matchWireSignedInt);
+            for (int eid = 1; eid <= maxEntityId; eid++) {
+                InetSocketAddress dest = udpBoundSlot[eid];
+                if (dest != null) udpChannel.write(new DatagramPacket(zoneSnap.retainedDuplicate(), dest));
+            }
+            zoneSnap.release();
         }
 
         udpChannel.flush();
@@ -251,6 +299,30 @@ public final class MatchRuntime {
                     ent.posY = (float) ((Math.random() - 0.5) * 200f);
                     ent.velX = 0f;
                     ent.velY = 0f;
+                }
+                return true;
+            }
+
+            if (header.type() == UdpOpcodes.C_ITEM_PICKUP) {
+                if (ent.hp <= 0) return true;
+                for (int i = 0; i < groundItems.size(); i++) {
+                    ServerItem item = groundItems.get(i);
+                    float dx = item.x - ent.posX;
+                    float dy = item.y - ent.posY;
+                    if (dx * dx + dy * dy < 25f * 25f) { // 25 units pickup radius
+                        // Drop current weapon if it isn't the starter pistol
+                        if (ent.heldWeaponType != 1) {
+                            ServerItem drop = new ServerItem();
+                            drop.entityId = nextItemEntityId++;
+                            drop.itemType = ent.heldWeaponType;
+                            drop.x = ent.posX; drop.y = ent.posY;
+                            groundItems.add(drop);
+                        }
+                        // Equip new weapon and remove from ground
+                        ent.heldWeaponType = item.itemType;
+                        groundItems.remove(i);
+                        break;
+                    }
                 }
                 return true;
             }

@@ -12,13 +12,9 @@ import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Array;
 
+import io.github.drunkmages.game.*;
 import io.github.drunkmages.networking.MatchFoundPacket;
 import io.github.drunkmages.networking.NetworkClient;
-import io.github.drunkmages.game.GameConstants;
-import io.github.drunkmages.game.ClientPlayer;
-import io.github.drunkmages.game.ClientBullet;
-import io.github.drunkmages.game.WorldRenderer;
-import io.github.drunkmages.game.GameHUD;
 
 import java.util.List;
 
@@ -26,6 +22,8 @@ public final class GameScreen implements Screen {
 
     private final LobbyGame game;
     private final MatchFoundPacket matchInfo;
+
+    private final ClientZone clientZone = new ClientZone();
 
     // Components
     private final WorldRenderer worldRenderer;
@@ -86,9 +84,20 @@ public final class GameScreen implements Screen {
         // 1. Draw Map
         worldRenderer.drawBackground(shapes);
 
+        Gdx.gl.glEnable(GL20.GL_BLEND); // Enable transparency
+        shapes.setProjectionMatrix(worldRenderer.camera.combined);
+        clientZone.draw(shapes, game.udp.zonePeek());
+
         // 2. Draw Entities (using the same camera projection)
         shapes.setProjectionMatrix(worldRenderer.camera.combined);
         shapes.begin(ShapeRenderer.ShapeType.Filled);
+        for (NetworkClient.SnapshotItem item : game.udp.snapshotItemsPeek()) {
+            ClientItem.draw(shapes, item.x(), item.y(), item.itemType());
+        }
+
+        if (Gdx.input.isKeyJustPressed(Keys.F)) {
+            game.udp.sendPickupRequest();
+        }
 
         for (ClientBullet b : bullets) b.draw(shapes);
         for (ClientPlayer p : players) p.draw(shapes, myAimAngle);

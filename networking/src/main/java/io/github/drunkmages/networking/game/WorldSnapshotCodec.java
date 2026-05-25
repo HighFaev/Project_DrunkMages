@@ -18,14 +18,14 @@ final class WorldSnapshotCodec {
      * @param matchSignedBits bitwise {@code u32 match_id} as stored during {@code MATCH_FOUND}.
      */
 
-    static ByteBuf encode(ByteBufAllocator alloc, int srvSeq, int tick, int matchSignedBits, PlayerSimState[] players) {
+    static ByteBuf encode(ByteBufAllocator alloc, int srvSeq, int tick, int matchSignedBits, PlayerSimState[] players, java.util.List<MatchRuntime.ServerItem> items) {
         int est = UdpOpcodes.HEADER_BYTES + 2;
-        est += players.length * 60;
+        est += players.length * 60 + (items.size() * 15);
         ByteBuf payload = alloc.buffer(est);
         UdpHeader.write(
                 payload, UdpOpcodes.S_WORLD_SNAPSHOT, srvSeq, tick, 0, Integer.toUnsignedLong(matchSignedBits));
-        payload.writeByte(1); /* full snapshot flag */
-        int n = Math.min(players.length, 255);
+        payload.writeByte(1);
+        int n = Math.min(players.length + items.size(), 255);
         payload.writeByte(n);
         for (int i = 0; i < n; i++) {
             PlayerSimState ps = players[i];
@@ -39,13 +39,24 @@ final class WorldSnapshotCodec {
             payload.writeShort(ps.maxHp);
             payload.writeShort(0); // shield
             payload.writeShort(0); // max shield
-            payload.writeByte(0); // held slot
+            payload.writeByte(ps.heldWeaponType); // held slot
             payload.writeByte(ps.isShooting ? 3 : 0); // anim
             payload.writeByte(0); // inv weapon 0
             payload.writeByte(0);
             payload.writeByte(0); // ammo
             payload.writeByte(0);
         }
+
+        for (int i = 0; i < items.size() && (i + players.length) < 255; i++) {
+            MatchRuntime.ServerItem item = items.get(i);
+            payload.writeShort(item.entityId);
+            payload.writeByte(UdpOpcodes.ENTITY_ITEM_ON_GROUND);
+            payload.writeFloat(item.x);
+            payload.writeFloat(item.y);
+            payload.writeShort(item.itemType);
+            payload.writeByte(1); // quantity
+        }
+
         return payload;
     }
 }

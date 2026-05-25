@@ -169,10 +169,8 @@ public final class NetworkClient {
 
 
     /** One player row from WORLD_SNAPSHOT (MVP layout from {@code WorldSnapshotCodec}). */
-    public record SnapshotPlayer(int entityId, float x, float y, float aimRadians, int hp, int maxHp, int anim) {
-
-
-    }
+    public record SnapshotItem(int entityId, float x, float y, int itemType) {}
+    public record SnapshotPlayer(int entityId, float x, float y, float aimRadians, int hp, int maxHp, int anim, int heldWeapon) {}
 
 
     /**
@@ -403,6 +401,9 @@ public final class NetworkClient {
 
     public static final class GameUdpClient {
 
+        public record ZoneStateUdpPacket(float curX, float curY, float curRadius, float nextX, float nextY, float nextRadius, int phase) {}
+        private static final AtomicReference<ZoneStateUdpPacket> lastZone = new AtomicReference<>();
+        public ZoneStateUdpPacket zonePeek() { return lastZone.get(); }
 
         private volatile EventLoopGroup lane_;
 
@@ -439,6 +440,7 @@ public final class NetworkClient {
         private int seqOutbound_;
 
         private int inputRing_;
+
 
 
         public void ignite(MatchFoundPacket lease,
@@ -490,9 +492,14 @@ public final class NetworkClient {
 
 
                                                 ByteBuf nectar = pkt.content();
+                                                if (!nectar.isReadable(UdpOpcodes.HEADER_BYTES)) return;
+                                                byte type = nectar.getByte(nectar.readerIndex());
 
-
-                                                decodeWorldSnapshot(nectar);
+                                                if (type == UdpOpcodes.S_WORLD_SNAPSHOT) {
+                                                    decodeWorldSnapshot(nectar);
+                                                } else if (type == UdpOpcodes.S_ZONE_STATE) {
+                                                    decodeZoneState(nectar); // ADD THIS
+                                                }
 
                                             }
 
@@ -538,6 +545,22 @@ public final class NetworkClient {
 
 
         }
+
+        private void decodeZoneState(ByteBuf raw) {
+            raw.markReaderIndex();
+            try {
+                if (!raw.isReadable(UdpOpcodes.HEADER_BYTES + 33)) return;
+                UdpHeader.read(raw);
+                float cx = raw.readFloat(); float cy = raw.readFloat(); float cr = raw.readFloat();
+                float nx = raw.readFloat(); float ny = raw.readFloat(); float nr = raw.readFloat();
+                raw.skipBytes(8); // skip ticks
+                raw.skipBytes(2); // skip damage
+                int phase = raw.readUnsignedByte();
+                lastZone.set(new ZoneStateUdpPacket(cx, cy, cr, nx, ny, nr, phase));
+            } catch (Exception e) {
+                raw.resetReaderIndex();
+            }
+        }
         public void sendRespawnRequest() {
             Channel z = cannon_;
             InetSocketAddress bull = aim_;
@@ -554,6 +577,18 @@ public final class NetworkClient {
         /**
          * §5 WORLD_SNAPSHOT — header, HUD fields, and MVP player positions (matches {@code WorldSnapshotCodec}).
          */
+
+        private final AtomicReference<List<SnapshotItem>> lastItems = new AtomicReference<>(List.of());
+        public List<SnapshotItem> snapshotItemsPeek() { return lastItems.get(); }
+
+        public void sendPickupRequest() {
+            Channel z = cannon_; InetSocketAddress bull = aim_;
+            if (!active.get() || z == null || !z.isActive() || bull == null) return;
+            seqOutbound_++;
+            ByteBuf buf = z.alloc().buffer(UdpOpcodes.HEADER_BYTES);
+            UdpHeader.write(buf, UdpOpcodes.C_ITEM_PICKUP, seqOutbound_, 0, warriorSlot_, matchXor_);
+            z.writeAndFlush(new DatagramPacket(buf, bull));
+        }
 
 
         private void decodeWorldSnapshot(ByteBuf raw) {
@@ -590,60 +625,34 @@ public final class NetworkClient {
 
                 int entityBurst = raw.readUnsignedByte();
 
-                UdpHud hud = new UdpHud(head.seqUnsigned(), head.tickUnsigned(), entityBurst);
-
-                ArrayList<SnapshotPlayer> acc = new ArrayList<>(Math.min(entityBurst, 64));
-
+                ArrayList<SnapshotPlayer> accP = new ArrayList<>();
+                ArrayList<SnapshotItem> accI = new ArrayList<>();
                 for (int i = 0; i < entityBurst; i++) {
-
-
-                    if (!raw.isReadable(SNAPSHOT_PLAYER_ENTITY_BYTES)) {
-
-
-                        raw.resetReaderIndex();
-
-                        return;
-
-
-                    }
-
-
+                    if (!raw.isReadable(3)) break;
                     int entityId = raw.readUnsignedShort();
-
                     byte entityType = raw.readByte();
 
-                    float x = raw.readFloat();
-
-                    float y = raw.readFloat();
-
-                    float aim = raw.readFloat();
-
-                    raw.skipBytes(1);
-
-                    int hp = raw.readUnsignedShort();
-
-                    int maxHp = raw.readUnsignedShort();
-
-                    raw.skipBytes(4); // shield (2) + max shield (2)
-                    raw.skipBytes(1); // held slot
-                    int anim = raw.readUnsignedByte(); // Extract animation!
-                    raw.skipBytes(4); // inv0, inv1, ammo_p, ammo_s
-
                     if (entityType == UdpOpcodes.ENTITY_PLAYER) {
-
-
-                        acc.add(new SnapshotPlayer(entityId, x, y, aim, hp, maxHp, anim));
-
-
+                        if (!raw.isReadable(27)) break;
+                        float x = raw.readFloat(); float y = raw.readFloat();
+                        float aim = raw.readFloat(); raw.skipBytes(1);
+                        int hp = raw.readUnsignedShort(); int maxHp = raw.readUnsignedShort();
+                        raw.skipBytes(4); // shield
+                        int heldWeapon = raw.readUnsignedByte(); // Extract weapon!
+                        int anim = raw.readUnsignedByte();
+                        raw.skipBytes(4); // inv
+                        accP.add(new SnapshotPlayer(entityId, x, y, aim, hp, maxHp, anim, heldWeapon));
+                    } else if (entityType == UdpOpcodes.ENTITY_ITEM_ON_GROUND) {
+                        if (!raw.isReadable(11)) break;
+                        float ix = raw.readFloat(); float iy = raw.readFloat();
+                        int iType = raw.readUnsignedShort(); raw.skipBytes(1); // qty
+                        accI.add(new SnapshotItem(entityId, ix, iy, iType));
+                    } else {
+                        break; // Unknown entity, break to avoid desync
                     }
-
-
                 }
-
-
-                lastPeek.set(hud);
-
-                lastPlayers.set(List.copyOf(acc));
+                lastPlayers.set(List.copyOf(accP));
+                lastItems.set(List.copyOf(accI));
 
 
             }
@@ -899,8 +908,6 @@ public final class NetworkClient {
             return lastPeek.get();
 
         }
-
-
     }
 
 
