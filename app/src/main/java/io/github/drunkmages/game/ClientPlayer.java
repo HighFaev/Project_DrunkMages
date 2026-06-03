@@ -15,12 +15,19 @@ public class ClientPlayer {
     private boolean initialized = false;
     public float enemyFireCooldown = 0f;
 
+    public static final int INVENTORY_SIZE = 5;
+    public int[] inventory = new int[INVENTORY_SIZE];
+    public int selectedSlot = 0;
+
     public void updateFromServer(NetworkClient.SnapshotPlayer p, boolean isSelf, float delta) {
         this.id = p.entityId() & 0xff;
         this.aimRadians = p.aimRadians();
         this.hp = p.hp();
         this.maxHp = p.maxHp();
         this.isSelf = isSelf;
+
+        System.arraycopy(p.inventory(), 0, this.inventory, 0, INVENTORY_SIZE);
+        this.selectedSlot = p.selectedSlot();
 
         if (!initialized) {
             this.x = p.x();

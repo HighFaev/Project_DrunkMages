@@ -8,6 +8,7 @@ import io.netty.buffer.ByteBufAllocator;
 public class ZoneManager {
     public float curX, curY, curRadius;
     public float nextX, nextY, nextRadius;
+    private float startX, startY, startRadius;
     public int shrinkStartTick, shrinkEndTick;
     public int damagePerTick;
     public int phase;
@@ -17,7 +18,8 @@ public class ZoneManager {
     public ZoneManager() {
         curX = 0; curY = 0; curRadius = MatchRuntime.ARENA_HALF * 1.5f; // Covers entire map
         nextX = 0; nextY = 0; nextRadius = curRadius;
-        advancePhase();
+        phase = 0;
+        setupPhase();
     }
 
     public void tick() {
@@ -34,34 +36,30 @@ public class ZoneManager {
         // Trigger next phase when shrink ends
         if (currentTick == shrinkEndTick) {
             curX = nextX; curY = nextY; curRadius = nextRadius;
-            advancePhase();
+            phase++;
+            setupPhase();
         }
     }
 
-    private void advancePhase() {
-        phase++;
-        shrinkStartTick = currentTick;
+    private void setupPhase() {
+        startX = curX; startY = curY; startRadius = curRadius;
+        int waitSeconds = 0; int shrinkSeconds = 0;
 
-        // Very fast test schedule (20 ticks = 1 second)
-        if (phase == 1) { // Wait
-            shrinkEndTick = currentTick + 200; // 10s wait
-            damagePerTick = 0;
-        } else if (phase == 2) { // Shrink 1
-            nextRadius = 200f;
-            pickNextCenter();
-            shrinkEndTick = currentTick + 400; // 20s shrink
-            damagePerTick = 2; // 2 damage per tick (40 dps!)
-        } else if (phase == 3) { // Wait
-            shrinkEndTick = currentTick + 100; // 5s wait
-            damagePerTick = 2;
-        } else if (phase == 4) { // Final Shrink
-            nextRadius = 0f;
-            pickNextCenter();
-            shrinkEndTick = currentTick + 400; // 20s shrink
-            damagePerTick = 5; // Instant death almost
-        } else {
-            shrinkEndTick = currentTick + 999999; // Game over
+        // Apply balanced 5-Phase Schedule
+        switch (phase) {
+            case 0: waitSeconds = 60; shrinkSeconds = 0;  damagePerTick = 0;  nextRadius = curRadius; break; // Looting
+            case 1: waitSeconds = 0;  shrinkSeconds = 30; damagePerTick = 1;  nextRadius = MatchRuntime.ARENA_HALF * 0.7f; break;
+            case 2: waitSeconds = 20; shrinkSeconds = 25; damagePerTick = 2;  nextRadius = MatchRuntime.ARENA_HALF * 0.4f; break;
+            case 3: waitSeconds = 15; shrinkSeconds = 20; damagePerTick = 4;  nextRadius = MatchRuntime.ARENA_HALF * 0.2f; break;
+            case 4: waitSeconds = 10; shrinkSeconds = 15; damagePerTick = 7;  nextRadius = MatchRuntime.ARENA_HALF * 0.05f; break;
+            case 5: waitSeconds = 0;  shrinkSeconds = 20; damagePerTick = 10; nextRadius = 0f; break;
         }
+
+        if (shrinkSeconds > 0) pickNextCenter();
+        else { nextX = curX; nextY = curY; }
+
+        shrinkStartTick = currentTick + (waitSeconds * 20); // 20 Ticks = 1 Second
+        shrinkEndTick = shrinkStartTick + (shrinkSeconds * 20);
     }
 
     private void pickNextCenter() {

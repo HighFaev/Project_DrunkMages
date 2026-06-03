@@ -7,6 +7,8 @@ import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.InputMultiplexer;
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
@@ -30,6 +32,7 @@ public final class GameScreen implements Screen {
     private final GameHUD hud;
     private final ShapeRenderer shapes;
     private final Vector3 scratch = new Vector3();
+    private final SpriteBatch batch;
 
     // Game State
     private final ClientPlayer[] players = new ClientPlayer[256];
@@ -43,6 +46,8 @@ public final class GameScreen implements Screen {
         this.matchInfo = matchInfo;
         this.worldRenderer = new WorldRenderer();
         this.shapes = new ShapeRenderer();
+
+        this.batch = new SpriteBatch();
 
         for (int i = 0; i < 256; i++) {
             players[i] = new ClientPlayer();
@@ -88,12 +93,20 @@ public final class GameScreen implements Screen {
         shapes.setProjectionMatrix(worldRenderer.camera.combined);
         clientZone.draw(shapes, game.udp.zonePeek());
 
+        batch.setProjectionMatrix(worldRenderer.camera.combined);
+        batch.begin();
+        for (NetworkClient.SnapshotItem item : game.udp.snapshotItemsPeek()) {
+            Texture tex = hud.getWeaponTexture(item.itemType());
+            if (tex != null) {
+                // Draw a 16x16 world-size weapon centered at item.x, item.y
+                batch.draw(tex, item.x() - 8, item.y() - 8, 16, 16);
+            }
+        }
+        batch.end();
+
         // 2. Draw Entities (using the same camera projection)
         shapes.setProjectionMatrix(worldRenderer.camera.combined);
         shapes.begin(ShapeRenderer.ShapeType.Filled);
-        for (NetworkClient.SnapshotItem item : game.udp.snapshotItemsPeek()) {
-            ClientItem.draw(shapes, item.x(), item.y(), item.itemType());
-        }
 
         if (Gdx.input.isKeyJustPressed(Keys.F)) {
             game.udp.sendPickupRequest();
@@ -118,6 +131,10 @@ public final class GameScreen implements Screen {
 
         // 3. Draw HUD
         updateHUD();
+        ClientPlayer meLocal = players[matchInfo.localMatchPlayerId() & 0xff];
+        if (meLocal != null) {
+            hud.drawInventory(meLocal.inventory, meLocal.selectedSlot);
+        }
         hud.stage.act(delta);
         hud.stage.draw();
     }
@@ -157,6 +174,17 @@ public final class GameScreen implements Screen {
             }
         }
 
+        ClientPlayer me = players[selfSlot & 0xff];
+
+        if (me != null) {
+            // Hotbar selection
+            if (Gdx.input.isKeyJustPressed(Keys.NUM_1)) { me.selectedSlot = 0; game.udp.sendSwitchWeaponRequest(0); }
+            if (Gdx.input.isKeyJustPressed(Keys.NUM_2)) { me.selectedSlot = 1; game.udp.sendSwitchWeaponRequest(1); }
+            if (Gdx.input.isKeyJustPressed(Keys.NUM_3)) { me.selectedSlot = 2; game.udp.sendSwitchWeaponRequest(2); }
+            if (Gdx.input.isKeyJustPressed(Keys.NUM_4)) { me.selectedSlot = 3; game.udp.sendSwitchWeaponRequest(3); }
+            if (Gdx.input.isKeyJustPressed(Keys.NUM_5)) { me.selectedSlot = 4; game.udp.sendSwitchWeaponRequest(4); }
+        }
+
         // Mouse aiming
         scratch.set(Gdx.input.getX(), Gdx.input.getY(), 0f);
         worldRenderer.camera.unproject(scratch);
@@ -189,6 +217,19 @@ public final class GameScreen implements Screen {
 
             // If it flew off-map or ran out of life, remove it
             if (b.update(delta)) {
+                bullets.removeIndex(i);
+                continue;
+            }
+
+            boolean hitWall = false;
+            for (float[] wall : WorldRenderer.WALLS) {
+                if (b.x >= wall[0] && b.x <= wall[2] && b.y >= wall[1] && b.y <= wall[3]) {
+                    hitWall = true;
+                    break;
+                }
+            }
+
+            if (hitWall) {
                 bullets.removeIndex(i);
                 continue;
             }
@@ -263,5 +304,6 @@ public final class GameScreen implements Screen {
     @Override public void dispose() {
         shapes.dispose();
         hud.dispose();
+        batch.dispose();
     }
 }

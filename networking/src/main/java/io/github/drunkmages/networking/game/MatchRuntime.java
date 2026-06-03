@@ -33,7 +33,20 @@ import java.util.function.BiConsumer;
 public final class MatchRuntime {
 
     // ── Physics constants ────────────────────────────────────────────────────
-
+    public static final float[][] WALLS = {
+            {-150, -20, -50, 20},    // Center-left barricade
+            {50, -20, 150, 20},      // Center-right barricade
+            {-20, -150, 20, -50},    // Bottom barricade
+            {-20, 50, 20, 150},      // Top barricade
+            {-300, -300, -200, -280},// Corner L-shapes
+            {-300, -300, -280, -200},
+            {200, 280, 300, 300},
+            {280, 200, 300, 300},
+            {-300, 280, -200, 300},
+            {-300, 200, -280, 300},
+            {200, -300, 300, -280},
+            {280, -300, 300, -200}
+    };
     /** §10: provisional top speed cap. */
     static final float MAX_SPEED = 42f;
 
@@ -168,7 +181,10 @@ public final class MatchRuntime {
             if (ps.hp <= 0) continue;
             ps.fireCooldown -= TICK_DELTA;
 
-            WeaponDef weapon = WeaponDef.get(ps.heldWeaponType);
+            int currentWeaponType = ps.inventory[ps.selectedSlot];
+            if (currentWeaponType == 0) continue; // Cannot shoot empty hands
+
+            WeaponDef weapon = WeaponDef.get(currentWeaponType);
 
             if (ps.isShooting && ps.fireCooldown <= 0f) {
                 ps.fireCooldown = weapon.fireRate();
@@ -193,6 +209,19 @@ public final class MatchRuntime {
             p.y += p.vy * TICK_DELTA;
             p.life -= TICK_DELTA;
             boolean hit = false;
+            boolean hitWall = false;
+
+
+            for (float[] wall : WALLS) {
+                if (p.x >= wall[0] && p.x <= wall[2] && p.y >= wall[1] && p.y <= wall[3]) {
+                    hitWall = true;
+                    break;
+                }
+            }
+            if (hitWall) {
+                serverProjectiles.remove(i);
+                continue;
+            }
 
             for (PlayerSimState target : rosterOrdered) {
                 if (target.hp <= 0 || target.entityId == p.ownerId) continue;
@@ -234,6 +263,7 @@ public final class MatchRuntime {
         // 2. Clamp each player to arena walls
         for (PlayerSimState ps : rosterOrdered) {
             clampToArena(ps);
+            collideWithWalls(ps);
         }
 
         // 3. Resolve player-vs-player circle collisions (iterative, single pass)
@@ -242,6 +272,7 @@ public final class MatchRuntime {
         // 4. Re-clamp after pushback in case a collision pushed someone into a wall
         for (PlayerSimState ps : rosterOrdered) {
             clampToArena(ps);
+            collideWithWalls(ps);
         }
 
         // 5. Build and multicast WORLD_SNAPSHOT
@@ -271,6 +302,44 @@ public final class MatchRuntime {
 
         udpChannel.flush();
         snap.release();
+    }
+
+    private static void collideWithWalls(PlayerSimState ps) {
+        for (float[] wall : WALLS) {
+            float testX = ps.posX;
+            float testY = ps.posY;
+
+            // Find closest edge
+            if (ps.posX < wall[0]) testX = wall[0];
+            else if (ps.posX > wall[2]) testX = wall[2];
+
+            if (ps.posY < wall[1]) testY = wall[1];
+            else if (ps.posY > wall[3]) testY = wall[3];
+
+            float distX = ps.posX - testX;
+            float distY = ps.posY - testY;
+            float distance = (float) Math.sqrt((distX * distX) + (distY * distY));
+
+            if (distance < PLAYER_RADIUS) {
+                float overlap = PLAYER_RADIUS - distance;
+                if (distance == 0) {
+                    ps.posY += PLAYER_RADIUS;
+                    ps.velY = 0;
+                } else {
+                    float nx = distX / distance;
+                    float ny = distY / distance;
+                    ps.posX += nx * overlap;
+                    ps.posY += ny * overlap;
+
+                    // Cancel velocity in collision direction
+                    float dot = ps.velX * nx + ps.velY * ny;
+                    if (dot < 0f) {
+                        ps.velX -= dot * nx;
+                        ps.velY -= dot * ny;
+                    }
+                }
+            }
+        }
     }
 
     // ── Ingress (client → server) ─────────────────────────────────────────────
@@ -310,19 +379,36 @@ public final class MatchRuntime {
                     float dx = item.x - ent.posX;
                     float dy = item.y - ent.posY;
                     if (dx * dx + dy * dy < 25f * 25f) { // 25 units pickup radius
-                        // Drop current weapon if it isn't the starter pistol
-                        if (ent.heldWeaponType != 1) {
-                            ServerItem drop = new ServerItem();
-                            drop.entityId = nextItemEntityId++;
-                            drop.itemType = ent.heldWeaponType;
-                            drop.x = ent.posX; drop.y = ent.posY;
-                            groundItems.add(drop);
+                        boolean pickedUp = false;
+                        for (int slot = 0; slot < 5; slot++) {
+                            if (ent.inventory[slot] == 0) {
+                                ent.inventory[slot] = item.itemType;
+                                pickedUp = true;
+                                break;
+                            }
                         }
-                        // Equip new weapon and remove from ground
-                        ent.heldWeaponType = item.itemType;
+                        if (!pickedUp) {
+                            if (ent.inventory[ent.selectedSlot] != 1) { // Don't drop starter pistol
+                                ServerItem drop = new ServerItem();
+                                drop.entityId = nextItemEntityId++;
+                                drop.itemType = ent.inventory[ent.selectedSlot];
+                                drop.x = ent.posX; drop.y = ent.posY;
+                                groundItems.add(drop);
+                            }
+                            ent.inventory[ent.selectedSlot] = item.itemType;
+                        }
                         groundItems.remove(i);
                         break;
                     }
+                }
+                return true;
+            }
+
+            if (header.type() == UdpOpcodes.C_ITEM_USE) {
+                if (ent.hp <= 0) return true;
+                if (content.isReadable(1)) {
+                    int slot = content.readUnsignedByte();
+                    if (slot >= 0 && slot < 5) ent.selectedSlot = slot;
                 }
                 return true;
             }

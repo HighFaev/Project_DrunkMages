@@ -25,9 +25,14 @@ final class WorldSnapshotCodec {
         UdpHeader.write(
                 payload, UdpOpcodes.S_WORLD_SNAPSHOT, srvSeq, tick, 0, Integer.toUnsignedLong(matchSignedBits));
         payload.writeByte(1);
-        int n = Math.min(players.length + items.size(), 255);
-        payload.writeByte(n);
-        for (int i = 0; i < n; i++) {
+
+        // Calculate total entities
+        int totalEntities = Math.min(players.length + items.size(), 255);
+        payload.writeByte(totalEntities);
+        int encodedCount = 0;
+        // 1. Write Players (Only loop over the actual players array!)
+        int playersToWrite = Math.min(players.length, 255);
+        for (int i = 0; i < players.length && encodedCount < 255; i++) {
             PlayerSimState ps = players[i];
             payload.writeShort(ps.entityId);
             payload.writeByte(UdpOpcodes.ENTITY_PLAYER);
@@ -37,17 +42,18 @@ final class WorldSnapshotCodec {
             payload.writeByte(ps.hp > 0 ? 0 : 2); // alive
             payload.writeShort(ps.hp);
             payload.writeShort(ps.maxHp);
-            payload.writeShort(0); // shield
-            payload.writeShort(0); // max shield
-            payload.writeByte(ps.heldWeaponType); // held slot
-            payload.writeByte(ps.isShooting ? 3 : 0); // anim
-            payload.writeByte(0); // inv weapon 0
-            payload.writeByte(0);
-            payload.writeByte(0); // ammo
-            payload.writeByte(0);
+            payload.writeByte(ps.selectedSlot);       // 1 byte
+            payload.writeByte(ps.isShooting ? 3 : 0); // 1 byte
+            for (int slot = 0; slot < 5; slot++) {
+                payload.writeByte(ps.inventory[slot]);// 5 bytes
+            }
+            payload.writeMedium(0);                   // 3 bytes padding
+
+            encodedCount++;
         }
 
-        for (int i = 0; i < items.size() && (i + players.length) < 255; i++) {
+        // 2. Write Ground Items
+        for (int i = 0; i < items.size() && encodedCount < 255; i++) {
             MatchRuntime.ServerItem item = items.get(i);
             payload.writeShort(item.entityId);
             payload.writeByte(UdpOpcodes.ENTITY_ITEM_ON_GROUND);

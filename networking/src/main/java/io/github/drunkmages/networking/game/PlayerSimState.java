@@ -14,7 +14,9 @@ final class PlayerSimState {
     volatile float aimAngle;
     volatile boolean isShooting;
     volatile float fireCooldown = 0f;
-    volatile int heldWeaponType = 1;
+    //volatile int heldWeaponType = 1;
+    volatile int selectedSlot = 0;
+    volatile int[] inventory = new int[5];
 
     volatile int hp = 100;
     final int maxHp = 100;
@@ -23,6 +25,7 @@ final class PlayerSimState {
         this.entityId = entityId;
         this.posX = spawnX;
         this.posY = spawnY;
+        this.inventory[0] = 1;
     }
 
     /** Integrate simple linear motion capped by validated client velocity magnitude. */

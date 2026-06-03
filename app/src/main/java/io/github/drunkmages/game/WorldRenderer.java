@@ -13,6 +13,15 @@ public class WorldRenderer {
     private static final Color BORDER = new Color(0.08f, 0.20f, 0.08f, 1f);
     private static final Color WALL = new Color(0.30f, 0.28f, 0.20f, 1f);
 
+    public static final float[][] WALLS = {
+            {-150, -20, -50, 20}, {50, -20, 150, 20},
+            {-20, -150, 20, -50}, {-20, 50, 20, 150},
+            {-300, -300, -200, -280}, {-300, -300, -280, -200},
+            {200, 280, 300, 300}, {280, 200, 300, 300},
+            {-300, 280, -200, 300}, {-300, 200, -280, 300},
+            {200, -300, 300, -280}, {280, -300, 300, -200}
+    };
+
     public final OrthographicCamera camera;
 
     public WorldRenderer() {
@@ -73,6 +82,11 @@ public class WorldRenderer {
         shapes.rect(-GameConstants.ARENA_HALF, GameConstants.ARENA_HALF - WALL_THICK, GameConstants.ARENA_SIZE, WALL_THICK);
         shapes.rect(-GameConstants.ARENA_HALF, -GameConstants.ARENA_HALF, WALL_THICK, GameConstants.ARENA_SIZE);
         shapes.rect(GameConstants.ARENA_HALF - WALL_THICK, -GameConstants.ARENA_HALF, WALL_THICK, GameConstants.ARENA_SIZE);
+
+        shapes.setColor(new Color(0.40f, 0.38f, 0.30f, 1f)); // Slightly lighter tan
+        for (float[] wall : WALLS) {
+            shapes.rect(wall[0], wall[1], wall[2] - wall[0], wall[3] - wall[1]);
+        }
 
         shapes.end();
     }

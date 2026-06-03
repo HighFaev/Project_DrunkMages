@@ -17,6 +17,9 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 
+import java.util.HashMap;
+import java.util.Map;
+
 public class GameHUD {
     public final Stage stage;
     private final SpriteBatch batch;
@@ -25,6 +28,8 @@ public class GameHUD {
 
     private final Table killFeed;
     private final Table deathScreen;
+
+    private final Map<Integer, Texture> weaponTextures = new HashMap<>();
 
     public GameHUD(Runnable onLeaveClicked) {
         batch = new SpriteBatch();
@@ -59,6 +64,14 @@ public class GameHUD {
         deathScreen.setBackground(new com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable(new Texture(bgPm)));
         bgPm.dispose();
         stage.addActor(deathScreen);
+
+        try {
+            weaponTextures.put(1, new Texture(Gdx.files.internal("weapons/pistol.png")));
+            weaponTextures.put(3, new Texture(Gdx.files.internal("weapons/shotgun.png")));
+            weaponTextures.put(4, new Texture(Gdx.files.internal("weapons/ar.png")));
+        } catch (Exception e) {
+            System.err.println("Warning: Could not load weapon textures. Did you put them in src/main/resources/weapons/ ?");
+        }
     }
 
     public void addKillFeedEvent(String victim, String killer) {
@@ -81,6 +94,46 @@ public class GameHUD {
         TextButton leaveBtn = new TextButton("Disconnect", skin);
         leaveBtn.addListener(new ChangeListener() { @Override public void changed(ChangeEvent e, com.badlogic.gdx.scenes.scene2d.Actor a) { onLeave.run(); } });
         deathScreen.add(leaveBtn).width(200f).height(50f).row();
+    }
+
+    private final TextureRegion slotNormal = solidRegion(0.15f, 0.15f, 0.2f);
+    private final TextureRegion slotSelected = solidRegion(0.4f, 0.4f, 0.2f);
+
+    public void drawInventory(int[] inventory, int selectedSlot) {
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        batch.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        batch.begin();
+
+        int slotSize = 48;
+        int spacing = 8;
+        int totalWidth = (inventory.length * slotSize) + ((inventory.length - 1) * spacing);
+        int startX = (Gdx.graphics.getWidth() - totalWidth) / 2;
+        int startY = 20;
+
+        for (int i = 0; i < inventory.length; i++) {
+            int x = startX + i * (slotSize + spacing);
+            batch.draw((i == selectedSlot) ? slotSelected : slotNormal, x, startY, slotSize, slotSize);
+
+            hudFont.getData().setScale(0.8f);
+            hudFont.setColor(Color.LIGHT_GRAY);
+            hudFont.draw(batch, String.valueOf(i + 1), x + 4, startY + slotSize - 4);
+            hudFont.getData().setScale(1.1f);
+
+            int itemType = inventory[i];
+            if (itemType != 0) {
+                Texture weaponTex = weaponTextures.get(itemType);
+                if (weaponTex != null) {
+                    // Draw the image slightly smaller than the slot (40x40 inside a 48x48 slot)
+                    // Centered using +4 offsets
+                    batch.draw(weaponTex, x + 4, startY + 4, 40, 40);
+                } else {
+                    // Fallback to text if the image failed to load
+                    hudFont.setColor(Color.WHITE);
+                    hudFont.draw(batch, "Item", x + 6, startY + 28);
+                }
+            }
+        }
+        batch.end();
     }
 
     public void hideDeathScreen() {
@@ -108,6 +161,10 @@ public class GameHUD {
         batch.dispose();
         hudFont.dispose();
         skin.dispose();
+
+        for (Texture tex : weaponTextures.values()) {
+            tex.dispose();
+        }
     }
 
     private static Skin buildButtonSkin(BitmapFont font) {
@@ -133,5 +190,9 @@ public class GameHUD {
         TextureRegion tr = new TextureRegion(new Texture(pm));
         pm.dispose();
         return tr;
+    }
+
+    public Texture getWeaponTexture(int itemType) {
+        return weaponTextures.get(itemType);
     }
 }

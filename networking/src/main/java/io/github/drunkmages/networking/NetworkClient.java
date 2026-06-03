@@ -170,7 +170,7 @@ public final class NetworkClient {
 
     /** One player row from WORLD_SNAPSHOT (MVP layout from {@code WorldSnapshotCodec}). */
     public record SnapshotItem(int entityId, float x, float y, int itemType) {}
-    public record SnapshotPlayer(int entityId, float x, float y, float aimRadians, int hp, int maxHp, int anim, int heldWeapon) {}
+    public record SnapshotPlayer(int entityId, float x, float y, float aimRadians, int hp, int maxHp,int selectedSlot, int anim, int[] inventory) {}
 
 
     /**
@@ -637,11 +637,14 @@ public final class NetworkClient {
                         float x = raw.readFloat(); float y = raw.readFloat();
                         float aim = raw.readFloat(); raw.skipBytes(1);
                         int hp = raw.readUnsignedShort(); int maxHp = raw.readUnsignedShort();
-                        raw.skipBytes(4); // shield
-                        int heldWeapon = raw.readUnsignedByte(); // Extract weapon!
+                        int selectedSlot = raw.readUnsignedByte();
                         int anim = raw.readUnsignedByte();
-                        raw.skipBytes(4); // inv
-                        accP.add(new SnapshotPlayer(entityId, x, y, aim, hp, maxHp, anim, heldWeapon));
+                        int[] inv = new int[5];
+                        for (int k = 0; k < 5; k++) {
+                            inv[k] = raw.readUnsignedByte();
+                        }
+                        raw.skipBytes(3);// inv
+                        accP.add(new SnapshotPlayer(entityId, x, y, aim, hp, maxHp, selectedSlot, anim, inv));
                     } else if (entityType == UdpOpcodes.ENTITY_ITEM_ON_GROUND) {
                         if (!raw.isReadable(11)) break;
                         float ix = raw.readFloat(); float iy = raw.readFloat();
@@ -806,6 +809,16 @@ public final class NetworkClient {
 
         }
 
+
+        public void sendSwitchWeaponRequest(int slot) {
+            Channel z = cannon_; InetSocketAddress bull = aim_;
+            if (!active.get() || z == null || !z.isActive() || bull == null) return;
+            seqOutbound_++;
+            ByteBuf buf = z.alloc().buffer(UdpOpcodes.HEADER_BYTES + 1);
+            UdpHeader.write(buf, UdpOpcodes.C_ITEM_USE, seqOutbound_, 0, warriorSlot_, matchXor_);
+            buf.writeByte(slot);
+            z.writeAndFlush(new DatagramPacket(buf, bull));
+        }
 
         /** Tear down selectors + outbound cadence safely. */
 

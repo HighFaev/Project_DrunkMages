@@ -288,13 +288,13 @@ public final class NetworkServer {
         COUNTDOWN_RUNNING = false;
 
 
-        for (LobbyPeer peer : SESSIONS.values()) {
-
-
-            peer.readyToggle = false;
-
-
-        }
+//        for (LobbyPeer peer : SESSIONS.values()) {
+//
+//
+//            peer.readyToggle = false;
+//
+//
+//        }
 
 
     }
@@ -834,6 +834,8 @@ public final class NetworkServer {
 
 
                 broadcastRoster();
+
+                tryBeginMatchScheduling();
 
                 MatchRuntime rt = ARENA_REF.get();
                 if (rt != null && left.slot > 0 && UDP != null) {
