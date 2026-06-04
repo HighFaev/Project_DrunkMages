@@ -144,7 +144,6 @@ public final class GameScreen implements Screen {
         if (Gdx.input.isKeyPressed(Keys.S)) buttons |= 1; // BTN_UP
         if (Gdx.input.isKeyPressed(Keys.A)) buttons |= 4; // BTN_LEFT
         if (Gdx.input.isKeyPressed(Keys.D)) buttons |= 8; // BTN_RIGHT
-        if (Gdx.input.isButtonPressed(Buttons.LEFT)) buttons |= 128; // Shoot
 
         List<NetworkClient.SnapshotPlayer> snap = game.udp.snapshotPlayersPeek();
         int selfSlot = matchInfo.localMatchPlayerId();
@@ -160,15 +159,25 @@ public final class GameScreen implements Screen {
                 myX = players[id].x;
                 myY = players[id].y;
             } else if (p.hp() > 0) {
-                // Enemy shooting cosmetic bullets
+                // Enemy shooting cosmetic bullets matching weapon type
                 players[id].enemyFireCooldown -= delta;
                 if (p.anim() == 3 && players[id].enemyFireCooldown <= 0f) {
-                    players[id].enemyFireCooldown = GameConstants.FIRE_RATE;
-                    bullets.add(new ClientBullet(
-                            players[id].x, players[id].y,
-                            MathUtils.cos(p.aimRadians()) * GameConstants.BULLET_SPEED,
-                            MathUtils.sin(p.aimRadians()) * GameConstants.BULLET_SPEED,
-                            id));
+                    int weaponType = players[id].inventory[players[id].selectedSlot];
+                    float fireRate = 0.40f; float bulletSpeed = 240f; int projectiles = 1; float spread = 0.05f;
+
+                    if (weaponType == 3) { fireRate = 1.00f; bulletSpeed = 200f; projectiles = 5; spread = 0.25f; }
+                    else if (weaponType == 4) { fireRate = 0.15f; bulletSpeed = 300f; spread = 0.10f; }
+
+                    players[id].enemyFireCooldown = fireRate;
+
+                    for(int proj = 0; proj < projectiles; proj++) {
+                        float angle = p.aimRadians() + (MathUtils.random() - 0.5f) * spread;
+                        bullets.add(new ClientBullet(
+                                players[id].x, players[id].y,
+                                MathUtils.cos(angle) * bulletSpeed,
+                                MathUtils.sin(angle) * bulletSpeed,
+                                id));
+                    }
                 }
             }
         }
@@ -176,6 +185,11 @@ public final class GameScreen implements Screen {
         ClientPlayer me = players[selfSlot & 0xff];
 
         if (me != null) {
+            // Prevent sending shoot input to the server if selected slot is empty
+            if (me.hp > 0 && me.inventory[me.selectedSlot] != 0 && Gdx.input.isButtonPressed(Buttons.LEFT)) {
+                buttons |= 128; // Shoot
+            }
+
             // Hotbar selection
             if (Gdx.input.isKeyJustPressed(Keys.NUM_1)) { me.selectedSlot = 0; game.udp.sendSwitchWeaponRequest(0); }
             if (Gdx.input.isKeyJustPressed(Keys.NUM_2)) { me.selectedSlot = 1; game.udp.sendSwitchWeaponRequest(1); }
@@ -197,17 +211,38 @@ public final class GameScreen implements Screen {
     }
 
     private void updateBullets(float delta) {
-        // My local cosmetic bullets
-        myFireCooldown -= delta;
         ClientPlayer me = players[matchInfo.localMatchPlayerId() & 0xff];
 
-        // Only shoot if alive
-        if (me != null && me.hp > 0 && Gdx.input.isButtonPressed(Buttons.LEFT) && myFireCooldown <= 0f) {
-            myFireCooldown = GameConstants.FIRE_RATE;
-            bullets.add(new ClientBullet(myX, myY,
-                    MathUtils.cos(myAimAngle) * GameConstants.BULLET_SPEED,
-                    MathUtils.sin(myAimAngle) * GameConstants.BULLET_SPEED,
-                    me.id)); // PASS ownerId HERE
+        if (me != null) {
+            myFireCooldown -= delta;
+
+            // Only shoot local cosmetic bullets if alive AND holding a weapon
+            if (me.hp > 0 && Gdx.input.isButtonPressed(Buttons.LEFT) && myFireCooldown <= 0f) {
+                int weaponType = me.inventory[me.selectedSlot];
+
+                if (weaponType != 0) {
+                    float fireRate = 0.40f;
+                    float bulletSpeed = 240f;
+                    int projectiles = 1;
+                    float spread = 0.05f;
+
+                    if (weaponType == 3) { // Shotgun
+                        fireRate = 1.00f; bulletSpeed = 200f; projectiles = 5; spread = 0.25f;
+                    } else if (weaponType == 4) { // AR
+                        fireRate = 0.15f; bulletSpeed = 300f; spread = 0.10f;
+                    }
+
+                    myFireCooldown = fireRate;
+
+                    for (int p = 0; p < projectiles; p++) {
+                        float angle = myAimAngle + (MathUtils.random() - 0.5f) * spread;
+                        bullets.add(new ClientBullet(myX, myY,
+                                MathUtils.cos(angle) * bulletSpeed,
+                                MathUtils.sin(angle) * bulletSpeed,
+                                me.id));
+                    }
+                }
+            }
         }
 
         // Update all bullets and remove dead/collided ones

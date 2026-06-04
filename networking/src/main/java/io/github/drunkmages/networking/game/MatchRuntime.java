@@ -415,7 +415,7 @@ public final class MatchRuntime {
                     ServerItem item = groundItems.get(i);
                     float dx = item.x - ent.posX;
                     float dy = item.y - ent.posY;
-                    if (dx * dx + dy * dy < 25f * 25f) { // 25 units pickup radius
+                    if (dx * dx + dy * dy < 60f * 60f) {
                         boolean pickedUp = false;
                         for (int slot = 0; slot < 5; slot++) {
                             if (ent.inventory[slot] == 0) {
