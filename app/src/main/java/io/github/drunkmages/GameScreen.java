@@ -17,6 +17,7 @@ import com.badlogic.gdx.utils.Array;
 import io.github.drunkmages.game.*;
 import io.github.drunkmages.networking.MatchFoundPacket;
 import io.github.drunkmages.networking.NetworkClient;
+import io.github.drunkmages.networking.PlayerDiedTcpPacket;
 
 import java.util.List;
 
@@ -118,14 +119,12 @@ public final class GameScreen implements Screen {
         shapes.end();
 
         // Handle Death Events
-        io.github.drunkmages.networking.PlayerDiedTcpPacket death;
+        PlayerDiedTcpPacket death;
         while ((death = game.deathEvents.poll()) != null) {
             hud.addKillFeedEvent(death.victimNickname(), death.killerNickname());
             if (death.playerId() == matchInfo.localMatchPlayerId()) {
-                hud.showDeathScreen(death.killerNickname(), () -> {
-                    hud.hideDeathScreen();
-                    game.udp.sendRespawnRequest();// Dummy respawn function (hides UI)
-                }, () -> game.disconnect());
+                // Drop the respawn runnable
+                hud.showDeathScreen(death.killerNickname(), () -> game.disconnect());
             }
         }
 
@@ -289,12 +288,31 @@ public final class GameScreen implements Screen {
         String line2 = (me != null && me.hp >= 0) ? "HP  " + me.hp + " / " + me.maxHp : "HP …";
         String line3 = "WASD move  ·  mouse aim  ·  LMB shoot  ·  Esc leave";
 
-        hud.drawText(line1, line2, line3);
+        NetworkClient.GameUdpClient.ZoneStateUdpPacket zone = game.udp.zonePeek();
+        if (zone != null && udpInfo != null) {
+            int ticksUntilShrink = zone.shrinkStartTick() - udpInfo.serverTick();
+            int ticksUntilEnd = zone.shrinkEndTick() - udpInfo.serverTick();
+            if (ticksUntilShrink > 0) {
+                line3 = "Zone shrinks in: " + (ticksUntilShrink / 20) + "s";
+            } else if (ticksUntilEnd > 0) {
+                line3 = "Zone is shrinking! (" + (ticksUntilEnd / 20) + "s)";
+            } else {
+                line3 = "Zone Phase " + zone.phase();
+            }
+        }
+
+        String line4 = "WASD move  ·  mouse aim  ·  LMB shoot  ·  Esc leave";
+
+        hud.drawText(line1, line2, line3, line4);
     }
 
     @Override public void resize(int width, int height) {
         worldRenderer.resize(width, height);
         hud.resize(width, height);
+    }
+
+    public void showWinScreen(io.github.drunkmages.networking.MatchEndPacket end) {
+        hud.showWinScreen(end, () -> game.disconnect());
     }
 
     @Override public void hide() { Gdx.input.setInputProcessor(null); }

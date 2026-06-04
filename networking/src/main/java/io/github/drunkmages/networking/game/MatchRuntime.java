@@ -9,12 +9,12 @@ import io.netty.channel.socket.DatagramPacket;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Objects;
-import java.util.ArrayList;
+import java.util.*;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+
+import io.github.drunkmages.networking.MatchEndPacket;
+import io.github.drunkmages.networking.MatchStatEntry;
 
 /**
  * Authoritative simulation for one match instance.
@@ -107,6 +107,9 @@ public final class MatchRuntime {
     }
     private final ArrayList<ServerProjectile> serverProjectiles = new ArrayList<>();
     private final BiConsumer<Integer, Integer> onDeath;
+    private final java.util.function.Consumer<MatchEndPacket> onMatchEnd;
+    private final java.util.Map<Integer, String> slotToNick;
+    private boolean matchEnded = false;
 
     public static final class ServerItem {
         public int entityId;
@@ -118,8 +121,10 @@ public final class MatchRuntime {
 
     // ── Constructor ──────────────────────────────────────────────────────────
 
-    public MatchRuntime(int matchWireSignedInt, List<MatchParticipant> rosterUnsorted, BiConsumer<Integer, Integer> onDeath) {
+    public MatchRuntime(int matchWireSignedInt, List<MatchParticipant> rosterUnsorted, Map<Integer, String> slotToNick, BiConsumer<Integer, Integer> onDeath, Consumer<MatchEndPacket> onMatchEnd) {
         this.onDeath = onDeath;
+        this.onMatchEnd = onMatchEnd;
+        this.slotToNick = slotToNick;
         Objects.requireNonNull(rosterUnsorted);
 
         List<MatchParticipant> roster =
@@ -177,6 +182,11 @@ public final class MatchRuntime {
      * <p>Must be called exclusively from the UDP channel's event loop.
      */
     public void advanceAndMulticast(Channel udpChannel) {
+        int aliveCount = 0;
+        for (PlayerSimState ps : rosterOrdered) {
+            if (ps.hp > 0) aliveCount++;
+        }
+
         for (PlayerSimState ps : rosterOrdered) {
             if (ps.hp <= 0) continue;
             ps.fireCooldown -= TICK_DELTA;
@@ -225,14 +235,18 @@ public final class MatchRuntime {
 
             for (PlayerSimState target : rosterOrdered) {
                 if (target.hp <= 0 || target.entityId == p.ownerId) continue;
-                float dx = target.posX - p.x;
-                float dy = target.posY - p.y;
-                // Hitbox check (using 14f to make it feel generous/fair)
+                float dx = target.posX - p.x; float dy = target.posY - p.y;
                 if (dx * dx + dy * dy < 14f * 14f) {
-                    target.hp -= 25; // 4 hits to kill
-                    hit = true;
+                    target.hp -= 25; hit = true;
+                    PlayerSimState killer = lookup(p.ownerId);
+                    if (killer != null && killer.entityId != target.entityId) killer.damageDealt += 25;
+
                     if (target.hp <= 0) {
-                        onDeath.accept(target.entityId, p.ownerId); // Notify death
+                        target.placement = aliveCount;
+                        target.survivalTicks = authoritativeTick;
+                        if (killer != null && killer.entityId != target.entityId) killer.kills++;
+                        onDeath.accept(target.entityId, p.ownerId);
+                        aliveCount--;
                     }
                     break;
                 }
@@ -247,12 +261,35 @@ public final class MatchRuntime {
         zone.tick();
         for (PlayerSimState ps : rosterOrdered) {
             if (ps.hp <= 0) continue;
-            float dx = ps.posX - zone.curX;
-            float dy = ps.posY - zone.curY;
+            float dx = ps.posX - zone.curX; float dy = ps.posY - zone.curY;
             if (dx * dx + dy * dy > zone.curRadius * zone.curRadius) {
                 ps.hp -= zone.damagePerTick;
-                if (ps.hp <= 0) onDeath.accept(ps.entityId, 0); // 0 = Environment/Storm
+                if (ps.hp <= 0) {
+                    ps.placement = aliveCount;
+                    ps.survivalTicks = authoritativeTick;
+                    onDeath.accept(ps.entityId, 0);
+                    aliveCount--;
+                }
             }
+        }
+
+        if (!matchEnded && (aliveCount <= 1 && rosterOrdered.length > 1 || rosterOrdered.length == 1 && aliveCount == 0)) {
+            matchEnded = true;
+            PlayerSimState winner = null;
+            for (PlayerSimState ps : rosterOrdered) if (ps.hp > 0) winner = ps;
+
+            int winnerId = winner != null ? winner.entityId : 0;
+            String winnerNick = winner != null ? slotToNick.get(winnerId) : "";
+            if (winner != null) {
+                winner.placement = 1;
+                winner.survivalTicks = authoritativeTick;
+            }
+
+            List<MatchStatEntry> stats = new ArrayList<>();
+            for (PlayerSimState ps : rosterOrdered) {
+                stats.add(new MatchStatEntry(ps.entityId, ps.placement, ps.kills, ps.damageDealt, ps.survivalTicks));
+            }
+            onMatchEnd.accept(new MatchEndPacket(assignedMatchUnsignedLong, winnerId, winnerNick, authoritativeTick, stats));
         }
 
         // 1. Apply client-driven motion
@@ -361,14 +398,14 @@ public final class MatchRuntime {
             if (expected == null || !expected.equals(sender.getAddress())) return false;
 
             if (header.type() == UdpOpcodes.C_RELOAD) {
-                if (ent.hp <= 0) {
-                    ent.hp = ent.maxHp;
-                    // Respawn at a random location near the center
-                    ent.posX = (float) ((Math.random() - 0.5) * 200f);
-                    ent.posY = (float) ((Math.random() - 0.5) * 200f);
-                    ent.velX = 0f;
-                    ent.velY = 0f;
-                }
+//                if (ent.hp <= 0) {
+//                    ent.hp = ent.maxHp;
+//                    // Respawn at a random location near the center
+//                    ent.posX = (float) ((Math.random() - 0.5) * 200f);
+//                    ent.posY = (float) ((Math.random() - 0.5) * 200f);
+//                    ent.velX = 0f;
+//                    ent.velY = 0f;
+//                }
                 return true;
             }
 

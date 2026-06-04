@@ -102,4 +102,27 @@ final class LobbyTcpOutbound {
         b.writeByte(placement);
         return b;
     }
+
+    static ByteBuf matchEnd(ByteBufAllocator alloc, long matchId, int winnerId, String winnerNick, int durationTicks, java.util.List<MatchStatEntry> stats) {
+        String winSafe = winnerNick == null ? "" : winnerNick;
+        int size = 1 + 4 + 2 + 2 + winSafe.getBytes(java.nio.charset.StandardCharsets.UTF_8).length + 4 + 1;
+        for (MatchStatEntry s : stats) size += 2 + 1 + 2 + 2 + 4;
+
+        var b = alloc.buffer(size);
+        b.writeByte(TcpOpcodes.S_MATCH_END);
+        b.writeInt((int)(matchId & 0xffffffffL));
+        b.writeShort(winnerId);
+        Wire.writeStr(b, winSafe);
+        b.writeInt(durationTicks);
+        b.writeByte(stats.size());
+
+        for (MatchStatEntry s : stats) {
+            b.writeShort(s.playerId());
+            b.writeByte(s.placement());
+            b.writeShort(s.kills());
+            b.writeShort(s.damageDealt());
+            b.writeInt((int)(s.survivalTicks() & 0xffffffffL));
+        }
+        return b;
+    }
 }

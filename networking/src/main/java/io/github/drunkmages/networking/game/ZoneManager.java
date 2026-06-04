@@ -73,7 +73,7 @@ public class ZoneManager {
     }
 
     public ByteBuf encode(ByteBufAllocator alloc, int srvSeq, int matchSignedBits) {
-        ByteBuf payload = alloc.buffer(UdpOpcodes.HEADER_BYTES + 33);
+        ByteBuf payload = alloc.buffer(UdpOpcodes.HEADER_BYTES + 35);
         UdpHeader.write(payload, UdpOpcodes.S_ZONE_STATE, srvSeq, currentTick, 0, Integer.toUnsignedLong(matchSignedBits));
         payload.writeFloat(curX);
         payload.writeFloat(curY);

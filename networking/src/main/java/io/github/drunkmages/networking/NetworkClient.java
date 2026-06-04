@@ -34,7 +34,7 @@ public final class NetworkClient {
 
     public interface LobbyListener {
 
-
+        default void onMatchEnd(MatchEndPacket pack) {}
         default void onWelcome(int lobbyAssignedId) {
 
 
@@ -401,7 +401,7 @@ public final class NetworkClient {
 
     public static final class GameUdpClient {
 
-        public record ZoneStateUdpPacket(float curX, float curY, float curRadius, float nextX, float nextY, float nextRadius, int phase) {}
+        public record ZoneStateUdpPacket(float curX, float curY, float curRadius, float nextX, float nextY, float nextRadius, int shrinkStartTick, int shrinkEndTick, int damagePerTick, int phase) { }
         private static final AtomicReference<ZoneStateUdpPacket> lastZone = new AtomicReference<>();
         public ZoneStateUdpPacket zonePeek() { return lastZone.get(); }
 
@@ -549,14 +549,16 @@ public final class NetworkClient {
         private void decodeZoneState(ByteBuf raw) {
             raw.markReaderIndex();
             try {
-                if (!raw.isReadable(UdpOpcodes.HEADER_BYTES + 33)) return;
+                // 6 floats (24 bytes) + 2 ints (8 bytes) + 1 short (2 bytes) + 1 byte (1 byte) = 35 bytes
+                if (!raw.isReadable(UdpOpcodes.HEADER_BYTES + 35)) return;
                 UdpHeader.read(raw);
                 float cx = raw.readFloat(); float cy = raw.readFloat(); float cr = raw.readFloat();
                 float nx = raw.readFloat(); float ny = raw.readFloat(); float nr = raw.readFloat();
-                raw.skipBytes(8); // skip ticks
-                raw.skipBytes(2); // skip damage
+                int startTick = raw.readInt();
+                int endTick = raw.readInt();
+                int damage = raw.readUnsignedShort();
                 int phase = raw.readUnsignedByte();
-                lastZone.set(new ZoneStateUdpPacket(cx, cy, cr, nx, ny, nr, phase));
+                lastZone.set(new ZoneStateUdpPacket(cx, cy, cr, nx, ny, nr, startTick, endTick, damage, phase));
             } catch (Exception e) {
                 raw.resetReaderIndex();
             }
@@ -970,15 +972,14 @@ public final class NetworkClient {
         protected void channelRead0(ChannelHandlerContext ctxDrain, Object frame) {
 
 
-            if (frame instanceof WelcomePacket greeting) {
-
-
-                ear_.onWelcome(greeting.id());
-
-
+            if (frame instanceof MatchEndPacket pack) {
+                ear_.onMatchEnd(pack);
                 return;
+            }
 
-
+            if (frame instanceof WelcomePacket greeting) {
+                ear_.onWelcome(greeting.id());
+                return;
             }
 
             if (frame instanceof PlayerDiedTcpPacket pd) {

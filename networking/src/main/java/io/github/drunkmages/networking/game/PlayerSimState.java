@@ -14,12 +14,16 @@ final class PlayerSimState {
     volatile float aimAngle;
     volatile boolean isShooting;
     volatile float fireCooldown = 0f;
-    //volatile int heldWeaponType = 1;
     volatile int selectedSlot = 0;
     volatile int[] inventory = new int[5];
 
     volatile int hp = 100;
     final int maxHp = 100;
+
+    volatile int kills = 0;
+    volatile int damageDealt = 0;
+    volatile int placement = 0;
+    volatile int survivalTicks = 0;
 
     PlayerSimState(int entityId, float spawnX, float spawnY) {
         this.entityId = entityId;

@@ -24,10 +24,7 @@ import io.netty.util.concurrent.ScheduledFuture;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Locale;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -401,21 +398,8 @@ public final class NetworkServer {
                                                     Math.PI * idx /
                                                     howManyPlayers);
 
-
-            float spawnX =
-                    (float)
-
-                            Math.cos(angle) *
-
-                            52f;
-
-
-            float spawnY =
-                    (float)
-
-                            Math.sin(angle) *
-
-                            52f;
+            float spawnX = (float) Math.cos(angle) * (io.github.drunkmages.networking.game.MatchRuntime.ARENA_HALF - 15f);
+            float spawnY = (float) Math.sin(angle) * (io.github.drunkmages.networking.game.MatchRuntime.ARENA_HALF - 15f);
 
 
             member.spawnPx = spawnX;
@@ -550,10 +534,10 @@ public final class NetworkServer {
         COUNTDOWN_RUNNING = false;
 
         stopTicker();
-        java.util.Map<Integer, String> slotToNick = new java.util.HashMap<>();
+        Map<Integer, String> slotToNick = new java.util.HashMap<>();
         for (LobbyPeer p : participantChannels) slotToNick.put(p.slot, p.info.nickname());
 
-        MatchRuntime rt = new MatchRuntime(wireMidBits, mathsRoster, (victimId, killerId) -> {
+        MatchRuntime rt = new MatchRuntime(wireMidBits, mathsRoster, slotToNick, (victimId, killerId) -> {
             String vNick = slotToNick.getOrDefault(victimId, "Unknown");
             String kNick = killerId == 0 ? "Environment" : slotToNick.getOrDefault(killerId, "Unknown");
             ByteBuf buf = LobbyTcpOutbound.playerDied(UDP.alloc(), victimId, vNick, killerId, kNick, 0);
@@ -561,6 +545,13 @@ public final class NetworkServer {
                 peer.socket().writeAndFlush(buf.retainedDuplicate());
             }
             buf.release();
+        }, (endPacket) -> {
+            ByteBuf buf = LobbyTcpOutbound.matchEnd(UDP.alloc(), endPacket.matchId(), endPacket.winnerId(), endPacket.winnerNickname(), endPacket.durationTicks(), endPacket.stats());
+            for (LobbyPeer peer : participantChannels) {
+                peer.socket().writeAndFlush(buf.retainedDuplicate());
+            }
+            buf.release();
+            stopTicker(); // Terminate simulation loop
         });
 
         ARENA_REF.set(rt);

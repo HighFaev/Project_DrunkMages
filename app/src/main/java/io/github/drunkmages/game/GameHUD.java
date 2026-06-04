@@ -195,4 +195,53 @@ public class GameHUD {
     public Texture getWeaponTexture(int itemType) {
         return weaponTextures.get(itemType);
     }
+
+    public void drawText(String line1, String line2, String line3, String line4) {
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        batch.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        batch.begin();
+        hudFont.setColor(Color.WHITE);
+        hudFont.draw(batch, line1, 12f, Gdx.graphics.getHeight() - 12f);
+        hudFont.draw(batch, line2, 12f, Gdx.graphics.getHeight() - 32f);
+        hudFont.setColor(Color.YELLOW);
+        hudFont.draw(batch, line3, 12f, Gdx.graphics.getHeight() - 52f);
+        hudFont.setColor(0.75f, 0.75f, 0.8f, 1f);
+        hudFont.draw(batch, line4, 12f, Gdx.graphics.getHeight() - 72f);
+        batch.end();
+    }
+
+    // 2. Remove Respawn button from Death Screen
+    public void showDeathScreen(String killerName, Runnable onLeave) {
+        deathScreen.clearChildren();
+        deathScreen.setVisible(true);
+        deathScreen.add(new Label("YOU DIED", new Label.LabelStyle(hudFont, Color.RED))).padBottom(20f).row();
+        deathScreen.add(new Label("Killed by: " + killerName, new Label.LabelStyle(hudFont, Color.WHITE))).padBottom(40f).row();
+
+        TextButton leaveBtn = new TextButton("Disconnect", skin);
+        leaveBtn.addListener(new ChangeListener() { @Override public void changed(ChangeEvent e, com.badlogic.gdx.scenes.scene2d.Actor a) { onLeave.run(); } });
+        deathScreen.add(leaveBtn).width(200f).height(50f).row();
+    }
+
+    // 3. Add Win Screen function
+    public void showWinScreen(io.github.drunkmages.networking.MatchEndPacket end, Runnable onLeave) {
+        deathScreen.clearChildren();
+        deathScreen.setVisible(true);
+        deathScreen.add(new Label("MATCH OVER", new Label.LabelStyle(hudFont, Color.GOLD))).padBottom(20f).row();
+
+        String winnerText = end.winnerNickname().isEmpty() ? "Nobody (Draw)" : end.winnerNickname();
+        deathScreen.add(new Label("Winner: " + winnerText, new Label.LabelStyle(hudFont, Color.WHITE))).padBottom(15f).row();
+
+        // Calculate and show winner kills
+        int winnerKills = 0;
+        for (io.github.drunkmages.networking.MatchStatEntry s : end.stats()) {
+            if (s.playerId() == end.winnerId()) winnerKills = s.kills();
+        }
+
+        deathScreen.add(new Label("Winner Kills: " + winnerKills, new Label.LabelStyle(hudFont, Color.CYAN))).padBottom(30f).row();
+        deathScreen.add(new Label("Match Duration: " + (end.durationTicks() / 20) + "s", new Label.LabelStyle(hudFont, Color.LIGHT_GRAY))).padBottom(40f).row();
+
+        TextButton leaveBtn = new TextButton("Back to Lobby", skin);
+        leaveBtn.addListener(new ChangeListener() { @Override public void changed(ChangeEvent e, com.badlogic.gdx.scenes.scene2d.Actor a) { onLeave.run(); } });
+        deathScreen.add(leaveBtn).width(200f).height(50f).row();
+    }
 }

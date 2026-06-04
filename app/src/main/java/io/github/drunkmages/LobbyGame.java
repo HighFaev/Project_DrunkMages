@@ -2,10 +2,7 @@ package io.github.drunkmages;
 
 import com.badlogic.gdx.Game;
 import io.github.drunkmages.common.PlayerInfo;
-import io.github.drunkmages.networking.MatchFoundPacket;
-import io.github.drunkmages.networking.MatchStartPacket;
-import io.github.drunkmages.networking.NetworkClient;
-import io.github.drunkmages.networking.PlayerDiedTcpPacket;
+import io.github.drunkmages.networking.*;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -69,6 +66,15 @@ public final class LobbyGame extends Game {
                     @Override
                     public void onPlayerDied(PlayerDiedTcpPacket note) {
                         deathEvents.add(note);
+                    }
+
+                    @Override
+                    public void onMatchEnd(MatchEndPacket end) {
+                        com.badlogic.gdx.Gdx.app.postRunnable(() -> {
+                            if (getScreen() instanceof GameScreen gs) {
+                                gs.showWinScreen(end);
+                            }
+                        });
                     }
 
                     @Override
