@@ -8,6 +8,7 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.actions.Actions;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
@@ -16,6 +17,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
+import io.github.drunkmages.networking.NetworkClient;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -74,42 +76,109 @@ public class GameHUD {
         }
     }
 
-    public void addKillFeedEvent(String victim, String killer) {
-        Label lbl = new Label(killer + " killed " + victim, new Label.LabelStyle(hudFont, Color.ORANGE));
+    public void addKillFeedEvent(String victim, String killer, boolean isLocalPlayer) {
+        // Different styling and length logic for self kills vs other kills
+        Label lbl = new Label(killer + " killed " + victim, new Label.LabelStyle(hudFont, isLocalPlayer ? Color.GREEN : Color.ORANGE));
         killFeed.add(lbl).right().padBottom(4f).row();
-        // Fade out and remove after 4 seconds
-        lbl.addAction(Actions.sequence(Actions.delay(4f), Actions.fadeOut(1f), Actions.removeActor()));
+        float delay = isLocalPlayer ? 10f : 5f;
+        lbl.addAction(Actions.sequence(Actions.delay(delay), Actions.fadeOut(1f), Actions.removeActor()));
     }
 
-    public void showDeathScreen(String killerName, Runnable onRespawn, Runnable onLeave) {
-        deathScreen.clearChildren();
-        deathScreen.setVisible(true);
-        deathScreen.add(new Label("YOU DIED", new Label.LabelStyle(hudFont, Color.RED))).padBottom(20f).row();
-        deathScreen.add(new Label("Killed by: " + killerName, new Label.LabelStyle(hudFont, Color.WHITE))).padBottom(40f).row();
+    public void drawMinimapAndStats(ShapeRenderer shapes, float pX, float pY, NetworkClient.GameUdpClient.ZoneStateUdpPacket zoneState, int kills, int aliveCount) {
+        float mapSize = 160f;
+        float pad = 15f;
+        float screenH = Gdx.graphics.getHeight();
+        float startX = pad;
+        float startY = screenH - pad - mapSize;
 
-        TextButton respawnBtn = new TextButton("Respawn", skin);
-        respawnBtn.addListener(new ChangeListener() { @Override public void changed(ChangeEvent e, com.badlogic.gdx.scenes.scene2d.Actor a) { onRespawn.run(); } });
-        deathScreen.add(respawnBtn).width(200f).height(50f).padBottom(10f).row();
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        shapes.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), screenH);
+        shapes.begin(ShapeRenderer.ShapeType.Filled);
 
-        TextButton leaveBtn = new TextButton("Disconnect", skin);
-        leaveBtn.addListener(new ChangeListener() { @Override public void changed(ChangeEvent e, com.badlogic.gdx.scenes.scene2d.Actor a) { onLeave.run(); } });
-        deathScreen.add(leaveBtn).width(200f).height(50f).row();
+        // Minimap Background
+        shapes.setColor(0f, 0f, 0f, 0.6f);
+        shapes.rect(startX, startY, mapSize, mapSize);
+
+        float arenaSize = GameConstants.ARENA_SIZE;
+        float scale = mapSize / arenaSize;
+        float off = GameConstants.ARENA_HALF;
+
+        // Current zone
+        if (zoneState != null) {
+            shapes.setColor(0.2f, 0.4f, 1f, 0.3f);
+            float zx = startX + (zoneState.curX() + off) * scale;
+            float zy = startY + (zoneState.curY() + off) * scale;
+            float zr = Math.max(0, zoneState.curRadius() * scale);
+            shapes.circle(zx, zy, zr, 30);
+        }
+
+        // Local Player point
+        shapes.setColor(Color.YELLOW);
+        float mx = startX + (pX + off) * scale;
+        float my = startY + (pY + off) * scale;
+        if (mx > startX && mx < startX + mapSize && my > startY && my < startY + mapSize) {
+            shapes.circle(mx, my, 3f, 10);
+        }
+        shapes.end();
+
+        // Next zone border
+        if (zoneState != null && zoneState.phase() % 2 == 0) {
+            shapes.begin(ShapeRenderer.ShapeType.Line);
+            shapes.setColor(Color.WHITE);
+            float nx = startX + (zoneState.nextX() + off) * scale;
+            float ny = startY + (zoneState.nextY() + off) * scale;
+            float nr = Math.max(0, zoneState.nextRadius() * scale);
+            shapes.circle(nx, ny, nr, 30);
+            shapes.end();
+        }
+
+        // Draw Player and Kill Stats Directly Underneath the Minimap
+        batch.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), screenH);
+        batch.begin();
+        hudFont.setColor(Color.WHITE);
+        hudFont.draw(batch, "Players Alive: " + aliveCount, startX, startY - 10f);
+        hudFont.draw(batch, "Kills: " + kills, startX, startY - 30f);
+        batch.end();
     }
 
     private final TextureRegion slotNormal = solidRegion(0.15f, 0.15f, 0.2f);
     private final TextureRegion slotSelected = solidRegion(0.4f, 0.4f, 0.2f);
 
-    public void drawInventory(int[] inventory, int selectedSlot) {
-        Gdx.gl.glEnable(GL20.GL_BLEND);
-        batch.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-        batch.begin();
-
+    public void drawInventory(ShapeRenderer shapes, int[] inventory, int selectedSlot, int hp, int maxHp) {
         int slotSize = 48;
         int spacing = 8;
         int totalWidth = (inventory.length * slotSize) + ((inventory.length - 1) * spacing);
         int startX = (Gdx.graphics.getWidth() - totalWidth) / 2;
         int startY = 20;
 
+        // Draw Health Bar Top Off Inventory
+        int hbWidth = totalWidth;
+        int hbHeight = 16;
+        int hbY = startY + slotSize + 12;
+
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        shapes.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        shapes.begin(ShapeRenderer.ShapeType.Filled);
+        shapes.setColor(0.15f, 0.15f, 0.15f, 0.8f);
+        shapes.rect(startX, hbY, hbWidth, hbHeight);
+
+        if (maxHp > 0 && hp > 0) {
+            float percent = Math.max(0f, Math.min(1f, (float) hp / maxHp));
+            shapes.setColor(0.8f, 0.2f, 0.2f, 0.9f);
+            shapes.rect(startX, hbY, hbWidth * percent, hbHeight);
+        }
+        shapes.end();
+
+        batch.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        batch.begin();
+
+        // Draw HP text
+        hudFont.getData().setScale(0.8f);
+        hudFont.setColor(Color.WHITE);
+        hudFont.draw(batch, Math.max(0, hp) + " / " + maxHp, startX + hbWidth / 2f - 20f, hbY + 13f);
+        hudFont.getData().setScale(1.1f);
+
+        // Draw Item Slots
         for (int i = 0; i < inventory.length; i++) {
             int x = startX + i * (slotSize + spacing);
             batch.draw((i == selectedSlot) ? slotSelected : slotNormal, x, startY, slotSize, slotSize);
@@ -123,11 +192,8 @@ public class GameHUD {
             if (itemType != 0) {
                 Texture weaponTex = weaponTextures.get(itemType);
                 if (weaponTex != null) {
-                    // Draw the image slightly smaller than the slot (40x40 inside a 48x48 slot)
-                    // Centered using +4 offsets
                     batch.draw(weaponTex, x + 4, startY + 4, 40, 40);
                 } else {
-                    // Fallback to text if the image failed to load
                     hudFont.setColor(Color.WHITE);
                     hudFont.draw(batch, "Item", x + 6, startY + 28);
                 }
@@ -196,21 +262,6 @@ public class GameHUD {
         return weaponTextures.get(itemType);
     }
 
-    public void drawText(String line1, String line2, String line3, String line4) {
-        Gdx.gl.glEnable(GL20.GL_BLEND);
-        batch.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-        batch.begin();
-        hudFont.setColor(Color.WHITE);
-        hudFont.draw(batch, line1, 12f, Gdx.graphics.getHeight() - 12f);
-        hudFont.draw(batch, line2, 12f, Gdx.graphics.getHeight() - 32f);
-        hudFont.setColor(Color.YELLOW);
-        hudFont.draw(batch, line3, 12f, Gdx.graphics.getHeight() - 52f);
-        hudFont.setColor(0.75f, 0.75f, 0.8f, 1f);
-        hudFont.draw(batch, line4, 12f, Gdx.graphics.getHeight() - 72f);
-        batch.end();
-    }
-
-    // 2. Remove Respawn button from Death Screen
     public void showDeathScreen(String killerName, Runnable onLeave) {
         deathScreen.clearChildren();
         deathScreen.setVisible(true);
@@ -222,7 +273,6 @@ public class GameHUD {
         deathScreen.add(leaveBtn).width(200f).height(50f).row();
     }
 
-    // 3. Add Win Screen function
     public void showWinScreen(io.github.drunkmages.networking.MatchEndPacket end, Runnable onLeave) {
         deathScreen.clearChildren();
         deathScreen.setVisible(true);
@@ -231,7 +281,6 @@ public class GameHUD {
         String winnerText = end.winnerNickname().isEmpty() ? "Nobody (Draw)" : end.winnerNickname();
         deathScreen.add(new Label("Winner: " + winnerText, new Label.LabelStyle(hudFont, Color.WHITE))).padBottom(15f).row();
 
-        // Calculate and show winner kills
         int winnerKills = 0;
         for (io.github.drunkmages.networking.MatchStatEntry s : end.stats()) {
             if (s.playerId() == end.winnerId()) winnerKills = s.kills();

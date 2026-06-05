@@ -41,6 +41,7 @@ public final class GameScreen implements Screen {
     private float myFireCooldown = 0f;
     private float myAimAngle = 0f;
     private float myX = 0f, myY = 0f;
+    private int myKills = 0;
 
     public GameScreen(LobbyGame game, MatchFoundPacket matchInfo) {
         this.game = game;
@@ -60,6 +61,8 @@ public final class GameScreen implements Screen {
 
     @Override
     public void show() {
+        Gdx.graphics.setWindowedMode(1280, 720);
+        Gdx.graphics.setResizable(false);
         myX = matchInfo.spawnX();
         myY = matchInfo.spawnY();
         worldRenderer.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -121,10 +124,21 @@ public final class GameScreen implements Screen {
         // Handle Death Events
         PlayerDiedTcpPacket death;
         while ((death = game.deathEvents.poll()) != null) {
-            hud.addKillFeedEvent(death.victimNickname(), death.killerNickname());
+            boolean isLocalPlayerKill = death.killerId() == matchInfo.localMatchPlayerId();
+            if (isLocalPlayerKill) {
+                myKills++;
+            }
+            hud.addKillFeedEvent(death.victimNickname(), death.killerNickname(), isLocalPlayerKill);
             if (death.playerId() == matchInfo.localMatchPlayerId()) {
-                // Drop the respawn runnable
                 hud.showDeathScreen(death.killerNickname(), () -> game.disconnect());
+            }
+        }
+
+        int aliveCount = 0;
+        List<NetworkClient.SnapshotPlayer> snap = game.udp.snapshotPlayersPeek();
+        if (snap != null) {
+            for (NetworkClient.SnapshotPlayer p : snap) {
+                if (p.hp() > 0) aliveCount++;
             }
         }
 
@@ -132,7 +146,10 @@ public final class GameScreen implements Screen {
         updateHUD();
         ClientPlayer meLocal = players[matchInfo.localMatchPlayerId() & 0xff];
         if (meLocal != null) {
-            hud.drawInventory(meLocal.inventory, meLocal.selectedSlot);
+            hud.drawInventory(shapes, meLocal.inventory, meLocal.selectedSlot, meLocal.hp, meLocal.maxHp);
+            hud.drawMinimapAndStats(shapes, meLocal.x, meLocal.y, game.udp.zonePeek(), myKills, aliveCount);
+        } else {
+            hud.drawMinimapAndStats(shapes, myX, myY, game.udp.zonePeek(), myKills, aliveCount);
         }
         hud.stage.act(delta);
         hud.stage.draw();
@@ -320,25 +337,25 @@ public final class GameScreen implements Screen {
 
         String line1 = (udpInfo == null) ? "UDP: waiting for snapshot…"
                 : "tick=" + udpInfo.serverTick() + "  entities=" + udpInfo.entityCount();
-        String line2 = (me != null && me.hp >= 0) ? "HP  " + me.hp + " / " + me.maxHp : "HP …";
-        String line3 = "WASD move  ·  mouse aim  ·  LMB shoot  ·  Esc leave";
+        String line2 = "";
+
 
         NetworkClient.GameUdpClient.ZoneStateUdpPacket zone = game.udp.zonePeek();
         if (zone != null && udpInfo != null) {
             int ticksUntilShrink = zone.shrinkStartTick() - udpInfo.serverTick();
             int ticksUntilEnd = zone.shrinkEndTick() - udpInfo.serverTick();
             if (ticksUntilShrink > 0) {
-                line3 = "Zone shrinks in: " + (ticksUntilShrink / 20) + "s";
+                line2 = "Zone shrinks in: " + (ticksUntilShrink / 20) + "s";
             } else if (ticksUntilEnd > 0) {
-                line3 = "Zone is shrinking! (" + (ticksUntilEnd / 20) + "s)";
+                line2 = "Zone is shrinking! (" + (ticksUntilEnd / 20) + "s)";
             } else {
-                line3 = "Zone Phase " + zone.phase();
+                line2 = "Zone Phase " + zone.phase();
             }
         }
 
-        String line4 = "WASD move  ·  mouse aim  ·  LMB shoot  ·  Esc leave";
+//        String line4 = "WASD move  ·  mouse aim  ·  LMB shoot  ·  Esc leave";
 
-        hud.drawText(line1, line2, line3, line4);
+        hud.drawText(line1, line2, "");
     }
 
     @Override public void resize(int width, int height) {
