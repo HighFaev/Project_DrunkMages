@@ -161,12 +161,69 @@ public final class MatchRuntime {
         for (int i = 0; i < 30; i++) {
             ServerItem item = new ServerItem();
             item.entityId = nextItemEntityId++;
-            item.itemType = Math.random() > 0.5 ? 3 : 4; // 50/50 Shotgun or AR
-            item.x = (float) ((Math.random() - 0.5) * (ARENA_HALF * 1.5));
-            item.y = (float) ((Math.random() - 0.5) * (ARENA_HALF * 1.5));
+
+            // 2. Collision Fix: Prevent spawning inside walls
+            float x, y;
+            do {
+                x = (float) ((Math.random() - 0.5) * (ARENA_HALF * 1.8));
+                y = (float) ((Math.random() - 0.5) * (ARENA_HALF * 1.8));
+            } while (isWallCollision(x, y, 8f));
+
+            item.x = x;
+            item.y = y;
+
+            // 1. Rarity & Spatial Spawning: Correlate distance to center
+            float dist = (float) Math.hypot(x, y);
+            float normalizedDist = dist / ARENA_HALF;
+            int rarity; // 0=Basic, 1=Uncommon, 2=Epic, 3=Legendary
+            double roll = Math.random();
+
+            if (normalizedDist < 0.3f) {         // Center (High chance of Gold)
+                rarity = roll < 0.5 ? 3 : (roll < 0.8 ? 2 : 1);
+            } else if (normalizedDist < 0.7f) {  // Mid
+                rarity = roll < 0.15 ? 3 : (roll < 0.4 ? 2 : (roll < 0.8 ? 1 : 0));
+            } else {                             // Outer Edges (Mostly White)
+                rarity = roll < 0.05 ? 3 : (roll < 0.15 ? 2 : (roll < 0.35 ? 1 : 0));
+            }
+
+            int baseType = Math.random() > 0.5 ? 3 : 4; // 3=Shotgun, 4=AR
+            item.itemType = (rarity << 8) | baseType;   // Encode rarity in upper bits
             groundItems.add(item);
         }
 
+    }
+
+    private static boolean isWallCollision(float x, float y, float radius) {
+        for (float[] wall : WALLS) {
+            if (x + radius > wall[0] && x - radius < wall[2] && y + radius > wall[1] && y - radius < wall[3]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static boolean hasLineOfSight(float x1, float y1, float x2, float y2) {
+        for (float[] wall : WALLS) {
+            if (lineIntersectsRect(x1, y1, x2, y2, wall[0], wall[1], wall[2], wall[3])) return false;
+        }
+        return true;
+    }
+
+    private static boolean lineIntersectsRect(float x1, float y1, float x2, float y2, float rx1, float ry1, float rx2, float ry2) {
+        if (x1 >= rx1 && x1 <= rx2 && y1 >= ry1 && y1 <= ry2) return true;
+        if (x2 >= rx1 && x2 <= rx2 && y2 >= ry1 && y2 <= ry2) return true;
+        return lineIntersectsLine(x1, y1, x2, y2, rx1, ry1, rx2, ry1) ||
+                lineIntersectsLine(x1, y1, x2, y2, rx2, ry1, rx2, ry2) ||
+                lineIntersectsLine(x1, y1, x2, y2, rx2, ry2, rx1, ry2) ||
+                lineIntersectsLine(x1, y1, x2, y2, rx1, ry2, rx1, ry1);
+    }
+
+    private static boolean lineIntersectsLine(float x1, float y1, float x2, float y2, float x3, float y3, float x4, float y4) {
+        float denom = ((y4 - y3) * (x2 - x1)) - ((x4 - x3) * (y2 - y1));
+        if (denom == 0) return false;
+        float ua = (((x4 - x3) * (y1 - y3)) - ((y4 - y3) * (x1 - x3))) / denom;
+        float ub = (((x2 - x1) * (y1 - y3)) - ((y2 - y1) * (x1 - x3))) / denom;
+        return (ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1);
     }
 
     public int signedMatchBits() {
@@ -191,7 +248,7 @@ public final class MatchRuntime {
             if (ps.hp <= 0) continue;
             ps.fireCooldown -= TICK_DELTA;
 
-            int currentWeaponType = ps.inventory[ps.selectedSlot];
+            int currentWeaponType = ps.inventory[ps.selectedSlot] & 0xFF; // MASKED
             if (currentWeaponType == 0) continue; // Cannot shoot empty hands
 
             WeaponDef weapon = WeaponDef.get(currentWeaponType);
@@ -416,6 +473,9 @@ public final class MatchRuntime {
                     float dx = item.x - ent.posX;
                     float dy = item.y - ent.posY;
                     if (dx * dx + dy * dy < 60f * 60f) {
+                        // 3. Line of Sight Check (Server Authority)
+                        if (!hasLineOfSight(ent.posX, ent.posY, item.x, item.y)) continue;
+
                         boolean pickedUp = false;
                         for (int slot = 0; slot < 5; slot++) {
                             if (ent.inventory[slot] == 0) {
@@ -425,7 +485,7 @@ public final class MatchRuntime {
                             }
                         }
                         if (!pickedUp) {
-                            if (ent.inventory[ent.selectedSlot] != 1) { // Don't drop starter pistol
+                            if ((ent.inventory[ent.selectedSlot] & 0xFF) != 1) { // MASKED check
                                 ServerItem drop = new ServerItem();
                                 drop.entityId = nextItemEntityId++;
                                 drop.itemType = ent.inventory[ent.selectedSlot];

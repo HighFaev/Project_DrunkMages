@@ -84,6 +84,39 @@ public class GameHUD {
         lbl.addAction(Actions.sequence(Actions.delay(delay), Actions.fadeOut(1f), Actions.removeActor()));
     }
 
+    public Color getRarityColor(int rarity) {
+        switch(rarity) {
+            case 1: return Color.ROYAL;       // Uncommon
+            case 2: return Color.PURPLE;      // Epic
+            case 3: return Color.GOLD;        // Legendary
+            case 0:
+            default: return Color.LIGHT_GRAY; // Basic
+        }
+    }
+
+    public String getRarityName(int rarity) {
+        switch(rarity) {
+            case 1: return "Uncommon";
+            case 2: return "Epic";
+            case 3: return "Legendary";
+            case 0:
+            default: return "Basic";
+        }
+    }
+
+    public void drawTooltip(String tooltipText, Color color) {
+        batch.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        batch.begin();
+        hudFont.setColor(color);
+        hudFont.getData().setScale(1.2f);
+        com.badlogic.gdx.graphics.g2d.GlyphLayout layout = new com.badlogic.gdx.graphics.g2d.GlyphLayout(hudFont, tooltipText);
+        float x = (Gdx.graphics.getWidth() - layout.width) / 2f;
+        float y = 140f; // Floating above the inventory
+        hudFont.draw(batch, layout, x, y);
+        hudFont.getData().setScale(1.1f);
+        batch.end();
+    }
+
     public void drawMinimapAndStats(ShapeRenderer shapes, float pX, float pY, NetworkClient.GameUdpClient.ZoneStateUdpPacket zoneState, int kills, int aliveCount) {
         float mapSize = 160f;
         float pad = 15f;
@@ -200,6 +233,23 @@ public class GameHUD {
             }
         }
         batch.end();
+
+        // Draw rarity colored borders over slots
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        shapes.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        shapes.begin(ShapeRenderer.ShapeType.Line);
+        Gdx.gl.glLineWidth(3f); // Thicker outline
+        for (int i = 0; i < inventory.length; i++) {
+            int baseType = inventory[i] & 0xFF;
+            int rarity = (inventory[i] >> 8) & 0xFF;
+            if (baseType != 0 && baseType != 1) { // Skip empty/starter pistol
+                int x = startX + i * (slotSize + spacing);
+                shapes.setColor(getRarityColor(rarity));
+                shapes.rect(x, startY, slotSize, slotSize);
+            }
+        }
+        shapes.end();
+        Gdx.gl.glLineWidth(1f);
     }
 
     public void hideDeathScreen() {
@@ -259,7 +309,7 @@ public class GameHUD {
     }
 
     public Texture getWeaponTexture(int itemType) {
-        return weaponTextures.get(itemType);
+        return weaponTextures.get(itemType & 0xFF);
     }
 
     public void showDeathScreen(String killerName, Runnable onLeave) {

@@ -42,6 +42,8 @@ public final class GameScreen implements Screen {
     private float myAimAngle = 0f;
     private float myX = 0f, myY = 0f;
     private int myKills = 0;
+    private float hoverTimer = 0f;
+    private int lastAimedItemId = -1;
 
     public GameScreen(LobbyGame game, MatchFoundPacket matchInfo) {
         this.game = game;
@@ -97,6 +99,17 @@ public final class GameScreen implements Screen {
         shapes.setProjectionMatrix(worldRenderer.camera.combined);
         clientZone.draw(shapes, game.udp.zonePeek());
 
+        shapes.setProjectionMatrix(worldRenderer.camera.combined);
+        shapes.begin(ShapeRenderer.ShapeType.Filled);
+        if (game.udp.snapshotItemsPeek() != null) {
+            for (NetworkClient.SnapshotItem item : game.udp.snapshotItemsPeek()) {
+                int rarity = (item.itemType() >> 8) & 0xFF;
+                shapes.setColor(hud.getRarityColor(rarity));
+                shapes.circle(item.x(), item.y(), 12f); // Decal base
+            }
+        }
+        shapes.end();
+
         batch.setProjectionMatrix(worldRenderer.camera.combined);
         batch.begin();
         for (NetworkClient.SnapshotItem item : game.udp.snapshotItemsPeek()) {
@@ -108,13 +121,52 @@ public final class GameScreen implements Screen {
         }
         batch.end();
 
+        NetworkClient.SnapshotItem aimedItem = null;
+        float bestDistSq = 60f * 60f;
+        float bestAngleDiff = 0.35f; // Roughly 20 degrees of view cone
+
+        if (game.udp.snapshotItemsPeek() != null) {
+            for (NetworkClient.SnapshotItem item : game.udp.snapshotItemsPeek()) {
+                float dx = item.x() - myX;
+                float dy = item.y() - myY;
+                float distSq = dx * dx + dy * dy;
+
+                if (distSq < bestDistSq) {
+                    float angleToItem = MathUtils.atan2(dy, dx);
+                    float diff = Math.abs(angleToItem - myAimAngle);
+                    while (diff > MathUtils.PI) diff -= MathUtils.PI2;
+                    while (diff < -MathUtils.PI) diff += MathUtils.PI2;
+                    diff = Math.abs(diff);
+
+                    if (diff < bestAngleDiff && clientHasLineOfSight(myX, myY, item.x(), item.y())) {
+                        aimedItem = item;
+                        bestAngleDiff = diff; // Lock to the closest matched angle
+                    }
+                }
+            }
+        }
+
+        // Hover Tooltip Timer updates
+        if (aimedItem != null) {
+            if (aimedItem.entityId() == lastAimedItemId) {
+                hoverTimer += delta;
+            } else {
+                hoverTimer = 0f;
+                lastAimedItemId = aimedItem.entityId();
+            }
+        } else {
+            hoverTimer = 0f;
+            lastAimedItemId = -1;
+        }
+
+        // F to Pickup now guarded by aiming requirement
+        if (Gdx.input.isKeyJustPressed(Keys.F) && aimedItem != null) {
+            game.udp.sendPickupRequest();
+        }
+
         // 2. Draw Entities (using the same camera projection)
         shapes.setProjectionMatrix(worldRenderer.camera.combined);
         shapes.begin(ShapeRenderer.ShapeType.Filled);
-
-        if (Gdx.input.isKeyJustPressed(Keys.F)) {
-            game.udp.sendPickupRequest();
-        }
 
         for (ClientBullet b : bullets) b.draw(shapes);
         for (ClientPlayer p : players) p.draw(shapes, myAimAngle);
@@ -153,6 +205,43 @@ public final class GameScreen implements Screen {
         }
         hud.stage.act(delta);
         hud.stage.draw();
+
+        if (aimedItem != null && hoverTimer >= 0.5f) {
+            int rarity = (aimedItem.itemType() >> 8) & 0xFF;
+            int baseType = aimedItem.itemType() & 0xFF;
+
+            String wName = "Unknown";
+            String wType = "Weapon";
+            if (baseType == 3) { wName = "Pump"; wType = "Shotgun"; }
+            else if (baseType == 4) { wName = "AK47"; wType = "Assault Rifle"; }
+
+            String text = hud.getRarityName(rarity) + ": " + wName + " " + wType;
+            hud.drawTooltip(text, hud.getRarityColor(rarity));
+        }
+    }
+
+    private boolean clientHasLineOfSight(float x1, float y1, float x2, float y2) {
+        for (float[] wall : WorldRenderer.WALLS) {
+            if (lineIntersectsRect(x1, y1, x2, y2, wall[0], wall[1], wall[2], wall[3])) return false;
+        }
+        return true;
+    }
+
+    private boolean lineIntersectsRect(float x1, float y1, float x2, float y2, float rx1, float ry1, float rx2, float ry2) {
+        if (x1 >= rx1 && x1 <= rx2 && y1 >= ry1 && y1 <= ry2) return true;
+        if (x2 >= rx1 && x2 <= rx2 && y2 >= ry1 && y2 <= ry2) return true;
+        return lineIntersectsLine(x1, y1, x2, y2, rx1, ry1, rx2, ry1) ||
+                lineIntersectsLine(x1, y1, x2, y2, rx2, ry1, rx2, ry2) ||
+                lineIntersectsLine(x1, y1, x2, y2, rx2, ry2, rx1, ry2) ||
+                lineIntersectsLine(x1, y1, x2, y2, rx1, ry2, rx1, ry1);
+    }
+
+    private boolean lineIntersectsLine(float x1, float y1, float x2, float y2, float x3, float y3, float x4, float y4) {
+        float denom = ((y4 - y3) * (x2 - x1)) - ((x4 - x3) * (y2 - y1));
+        if (denom == 0) return false;
+        float ua = (((x4 - x3) * (y1 - y3)) - ((y4 - y3) * (x1 - x3))) / denom;
+        float ub = (((x2 - x1) * (y1 - y3)) - ((y2 - y1) * (x1 - x3))) / denom;
+        return (ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1);
     }
 
     private void processInputAndNetwork(float delta) {
