@@ -18,6 +18,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import io.github.drunkmages.networking.NetworkClient;
+import com.badlogic.gdx.math.Matrix4;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -31,11 +32,14 @@ public class GameHUD {
     private final Table killFeed;
     private final Table deathScreen;
 
+    private final Matrix4 hudMatrix = new Matrix4();
+
     private final Map<Integer, Texture> weaponTextures = new HashMap<>();
 
     public GameHUD(Runnable onLeaveClicked) {
         batch = new SpriteBatch();
         hudFont = new BitmapFont();
+        hudFont.getRegion().getTexture().setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
         hudFont.getData().setScale(1.1f);
 
         stage = new Stage(new ScreenViewport());
@@ -104,16 +108,29 @@ public class GameHUD {
         }
     }
 
-    public void drawTooltip(String tooltipText, Color color) {
-        batch.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+    public void drawTooltip(ShapeRenderer shapes, String tooltipText, Color color) {
+        hudMatrix.setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+
+        hudFont.getData().setScale(1.4f); // Bigger font
+        com.badlogic.gdx.graphics.g2d.GlyphLayout layout = new com.badlogic.gdx.graphics.g2d.GlyphLayout(hudFont, tooltipText);
+        float textW = layout.width;
+        float textH = layout.height;
+        float x = (Gdx.graphics.getWidth() - textW) / 2f;
+        float y = 180f; // Floating nicely above the inventory
+
+        // Draw dark background box for readability
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        shapes.setProjectionMatrix(hudMatrix);
+        shapes.begin(ShapeRenderer.ShapeType.Filled);
+        shapes.setColor(0f, 0f, 0f, 0.85f);
+        shapes.rect(x - 12, y - textH - 12, textW + 24, textH + 24);
+        shapes.end();
+
+        batch.setProjectionMatrix(hudMatrix);
         batch.begin();
         hudFont.setColor(color);
-        hudFont.getData().setScale(1.2f);
-        com.badlogic.gdx.graphics.g2d.GlyphLayout layout = new com.badlogic.gdx.graphics.g2d.GlyphLayout(hudFont, tooltipText);
-        float x = (Gdx.graphics.getWidth() - layout.width) / 2f;
-        float y = 140f; // Floating above the inventory
         hudFont.draw(batch, layout, x, y);
-        hudFont.getData().setScale(1.1f);
+        hudFont.getData().setScale(1.1f); // Reset font scale
         batch.end();
     }
 
@@ -125,6 +142,7 @@ public class GameHUD {
         float startY = screenH - pad - mapSize;
 
         Gdx.gl.glEnable(GL20.GL_BLEND);
+        hudMatrix.setToOrtho2D(0, 0, Gdx.graphics.getWidth(), screenH);
         shapes.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), screenH);
         shapes.begin(ShapeRenderer.ShapeType.Filled);
 
@@ -166,7 +184,7 @@ public class GameHUD {
         }
 
         // Draw Player and Kill Stats Directly Underneath the Minimap
-        batch.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), screenH);
+        batch.setProjectionMatrix(hudMatrix); // FIX: Ensure text uses HUD matrix
         batch.begin();
         hudFont.setColor(Color.WHITE);
         hudFont.draw(batch, "Players Alive: " + aliveCount, startX, startY - 10f);
@@ -184,17 +202,18 @@ public class GameHUD {
         int startX = (Gdx.graphics.getWidth() - totalWidth) / 2;
         int startY = 20;
 
-        // Draw Health Bar Top Off Inventory
         int hbWidth = totalWidth;
         int hbHeight = 16;
         int hbY = startY + slotSize + 12;
 
         Gdx.gl.glEnable(GL20.GL_BLEND);
-        shapes.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        hudMatrix.setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        shapes.setProjectionMatrix(hudMatrix);
         shapes.begin(ShapeRenderer.ShapeType.Filled);
+
+        // Draw Health Bar
         shapes.setColor(0.15f, 0.15f, 0.15f, 0.8f);
         shapes.rect(startX, hbY, hbWidth, hbHeight);
-
         if (maxHp > 0 && hp > 0) {
             float percent = Math.max(0f, Math.min(1f, (float) hp / maxHp));
             shapes.setColor(0.8f, 0.2f, 0.2f, 0.9f);
@@ -202,10 +221,9 @@ public class GameHUD {
         }
         shapes.end();
 
-        batch.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        batch.setProjectionMatrix(hudMatrix);
         batch.begin();
 
-        // Draw HP text
         hudFont.getData().setScale(0.8f);
         hudFont.setColor(Color.WHITE);
         hudFont.draw(batch, Math.max(0, hp) + " / " + maxHp, startX + hbWidth / 2f - 20f, hbY + 13f);
@@ -214,16 +232,29 @@ public class GameHUD {
         // Draw Item Slots
         for (int i = 0; i < inventory.length; i++) {
             int x = startX + i * (slotSize + spacing);
+
+            // --- Color the inventory square ---
+            int itemData = inventory[i];
+            int baseType = itemData & 0xFF;
+            int rarity = (itemData >> 8) & 0xFF;
+
+            if (baseType != 0 && baseType != 1) {
+                Color rc = getRarityColor(rarity);
+                batch.setColor(rc.r, rc.g, rc.b, 0.75f); // Tint the square
+            } else {
+                batch.setColor(Color.WHITE); // Default empty/starter color
+            }
+
             batch.draw((i == selectedSlot) ? slotSelected : slotNormal, x, startY, slotSize, slotSize);
+            batch.setColor(Color.WHITE); // Reset color for drawing text/weapons
 
             hudFont.getData().setScale(0.8f);
             hudFont.setColor(Color.LIGHT_GRAY);
             hudFont.draw(batch, String.valueOf(i + 1), x + 4, startY + slotSize - 4);
             hudFont.getData().setScale(1.1f);
 
-            int itemType = inventory[i];
-            if (itemType != 0) {
-                Texture weaponTex = weaponTextures.get(itemType);
+            if (baseType != 0) {
+                Texture weaponTex = getWeaponTexture(baseType);
                 if (weaponTex != null) {
                     batch.draw(weaponTex, x + 4, startY + 4, 40, 40);
                 } else {
@@ -234,15 +265,15 @@ public class GameHUD {
         }
         batch.end();
 
-        // Draw rarity colored borders over slots
+        // Draw Prominent Colored Borders Over Filled Slots
         Gdx.gl.glEnable(GL20.GL_BLEND);
-        shapes.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        shapes.setProjectionMatrix(hudMatrix);
         shapes.begin(ShapeRenderer.ShapeType.Line);
-        Gdx.gl.glLineWidth(3f); // Thicker outline
+        Gdx.gl.glLineWidth(3f);
         for (int i = 0; i < inventory.length; i++) {
             int baseType = inventory[i] & 0xFF;
             int rarity = (inventory[i] >> 8) & 0xFF;
-            if (baseType != 0 && baseType != 1) { // Skip empty/starter pistol
+            if (baseType != 0 && baseType != 1) {
                 int x = startX + i * (slotSize + spacing);
                 shapes.setColor(getRarityColor(rarity));
                 shapes.rect(x, startY, slotSize, slotSize);

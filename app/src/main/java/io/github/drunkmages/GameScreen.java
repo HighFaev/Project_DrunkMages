@@ -105,7 +105,7 @@ public final class GameScreen implements Screen {
             for (NetworkClient.SnapshotItem item : game.udp.snapshotItemsPeek()) {
                 int rarity = (item.itemType() >> 8) & 0xFF;
                 shapes.setColor(hud.getRarityColor(rarity));
-                shapes.circle(item.x(), item.y(), 12f); // Decal base
+                shapes.circle(item.x(), item.y(), 6f); // Decal base
             }
         }
         shapes.end();
@@ -122,7 +122,6 @@ public final class GameScreen implements Screen {
         batch.end();
 
         NetworkClient.SnapshotItem aimedItem = null;
-        float bestDistSq = 60f * 60f;
         float bestAngleDiff = 0.35f; // Roughly 20 degrees of view cone
 
         if (game.udp.snapshotItemsPeek() != null) {
@@ -131,12 +130,18 @@ public final class GameScreen implements Screen {
                 float dy = item.y() - myY;
                 float distSq = dx * dx + dy * dy;
 
-                if (distSq < bestDistSq) {
-                    float angleToItem = MathUtils.atan2(dy, dx);
-                    float diff = Math.abs(angleToItem - myAimAngle);
-                    while (diff > MathUtils.PI) diff -= MathUtils.PI2;
-                    while (diff < -MathUtils.PI) diff += MathUtils.PI2;
-                    diff = Math.abs(diff);
+                // Ensure item is within pickup range
+                if (distSq < 60f * 60f) {
+                    float diff = 0f;
+
+                    // If not directly standing on top of it, calculate strict aim angle
+                    if (distSq > 14f * 14f) {
+                        float angleToItem = MathUtils.atan2(dy, dx);
+                        diff = Math.abs(angleToItem - myAimAngle);
+                        while (diff > MathUtils.PI) diff -= MathUtils.PI2;
+                        while (diff < -MathUtils.PI) diff += MathUtils.PI2;
+                        diff = Math.abs(diff);
+                    }
 
                     if (diff < bestAngleDiff && clientHasLineOfSight(myX, myY, item.x(), item.y())) {
                         aimedItem = item;
@@ -145,6 +150,7 @@ public final class GameScreen implements Screen {
                 }
             }
         }
+
 
         // Hover Tooltip Timer updates
         if (aimedItem != null) {
@@ -216,7 +222,7 @@ public final class GameScreen implements Screen {
             else if (baseType == 4) { wName = "AK47"; wType = "Assault Rifle"; }
 
             String text = hud.getRarityName(rarity) + ": " + wName + " " + wType;
-            hud.drawTooltip(text, hud.getRarityColor(rarity));
+            hud.drawTooltip(shapes, text, hud.getRarityColor(rarity));
         }
     }
 

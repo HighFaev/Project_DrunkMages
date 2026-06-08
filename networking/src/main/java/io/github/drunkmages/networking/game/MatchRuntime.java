@@ -468,39 +468,67 @@ public final class MatchRuntime {
 
             if (header.type() == UdpOpcodes.C_ITEM_PICKUP) {
                 if (ent.hp <= 0) return true;
+
+                // Use the most recent aim angle from client input
+                float currentAim = ent.aimAngle;
+                ClientInputPayload in = latestInputs.get(ent.entityId);
+                if (in != null) currentAim = in.aimAngle();
+
+                int bestIndex = -1;
+                float bestAngleDiff = 0.45f; // Server gives a slight lag tolerance (~25 degrees)
+
                 for (int i = 0; i < groundItems.size(); i++) {
                     ServerItem item = groundItems.get(i);
                     float dx = item.x - ent.posX;
                     float dy = item.y - ent.posY;
-                    if (dx * dx + dy * dy < 60f * 60f) {
+                    float distSq = dx * dx + dy * dy;
+
+                    if (distSq < 60f * 60f) {
                         // 3. Line of Sight Check (Server Authority)
                         if (!hasLineOfSight(ent.posX, ent.posY, item.x, item.y)) continue;
 
-                        boolean pickedUp = false;
-                        for (int slot = 0; slot < 5; slot++) {
-                            if (ent.inventory[slot] == 0) {
-                                ent.inventory[slot] = item.itemType;
-                                pickedUp = true;
-                                break;
-                            }
+                        float diff = 0f;
+                        // If the player is standing directly on top of the item, ignore the exact aim requirement
+                        if (distSq > 14f * 14f) {
+                            float angleToItem = (float) Math.atan2(dy, dx);
+                            diff = Math.abs(angleToItem - currentAim);
+                            while (diff > Math.PI) diff -= (float) (Math.PI * 2);
+                            while (diff < -Math.PI) diff += (float) (Math.PI * 2);
+                            diff = Math.abs(diff);
                         }
-                        if (!pickedUp) {
-                            if ((ent.inventory[ent.selectedSlot] & 0xFF) != 1) { // MASKED check
-                                ServerItem drop = new ServerItem();
-                                drop.entityId = nextItemEntityId++;
-                                drop.itemType = ent.inventory[ent.selectedSlot];
-                                drop.x = ent.posX; drop.y = ent.posY;
-                                groundItems.add(drop);
-                            }
-                            ent.inventory[ent.selectedSlot] = item.itemType;
+
+                        if (diff < bestAngleDiff) {
+                            bestAngleDiff = diff;
+                            bestIndex = i;
                         }
-                        groundItems.remove(i);
-                        break;
                     }
+                }
+
+                // Pick up the most accurately aimed item
+                if (bestIndex != -1) {
+                    ServerItem item = groundItems.get(bestIndex);
+                    boolean pickedUp = false;
+                    for (int slot = 0; slot < 5; slot++) {
+                        if (ent.inventory[slot] == 0) {
+                            ent.inventory[slot] = item.itemType;
+                            pickedUp = true;
+                            break;
+                        }
+                    }
+                    if (!pickedUp) {
+                        if ((ent.inventory[ent.selectedSlot] & 0xFF) != 1) { // MASKED check
+                            ServerItem drop = new ServerItem();
+                            drop.entityId = nextItemEntityId++;
+                            drop.itemType = ent.inventory[ent.selectedSlot];
+                            drop.x = ent.posX; drop.y = ent.posY;
+                            groundItems.add(drop);
+                        }
+                        ent.inventory[ent.selectedSlot] = item.itemType;
+                    }
+                    groundItems.remove(bestIndex);
                 }
                 return true;
             }
-
             if (header.type() == UdpOpcodes.C_ITEM_USE) {
                 if (ent.hp <= 0) return true;
                 if (content.isReadable(1)) {
