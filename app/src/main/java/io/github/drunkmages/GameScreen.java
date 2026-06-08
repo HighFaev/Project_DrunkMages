@@ -274,7 +274,9 @@ public final class GameScreen implements Screen {
                 // Enemy shooting cosmetic bullets matching weapon type
                 players[id].enemyFireCooldown -= delta;
                 if (p.anim() == 3 && players[id].enemyFireCooldown <= 0f) {
-                    int weaponType = players[id].inventory[players[id].selectedSlot];
+                    int weaponData = players[id].inventory[players[id].selectedSlot];
+                    int weaponType = weaponData & 0xFF; // FIX: Mask the rarity to get base type
+
                     float fireRate = 0.40f; float bulletSpeed = 240f; int projectiles = 1; float spread = 0.05f;
 
                     if (weaponType == 3) { fireRate = 1.00f; bulletSpeed = 200f; projectiles = 5; spread = 0.25f; }
@@ -330,7 +332,8 @@ public final class GameScreen implements Screen {
 
             // Only shoot local cosmetic bullets if alive AND holding a weapon
             if (me.hp > 0 && Gdx.input.isButtonPressed(Buttons.LEFT) && myFireCooldown <= 0f) {
-                int weaponType = me.inventory[me.selectedSlot];
+                int weaponData = me.inventory[me.selectedSlot];
+                int weaponType = weaponData & 0xFF;
 
                 if (weaponType != 0) {
                     float fireRate = 0.40f;

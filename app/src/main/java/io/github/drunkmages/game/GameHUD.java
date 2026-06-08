@@ -152,11 +152,21 @@ public class GameHUD {
 
         // Current zone
         if (zoneState != null) {
+            // Draw current zone in blue
             shapes.setColor(0.2f, 0.4f, 1f, 0.3f);
-            float zx = startX + (zoneState.nextX() + off) * scale;
-            float zy = startY + (zoneState.nextY() + off) * scale;
-            float zr = Math.max(0, zoneState.nextRadius() * scale);
-            shapes.circle(zx, zy, zr, 30);
+            float cx = startX + (zoneState.curX() + off) * scale;
+            float cy = startY + (zoneState.curY() + off) * scale;
+            float cr = Math.max(0, zoneState.curRadius() * scale);
+            shapes.circle(cx, cy, cr, 30);
+
+            // Draw next zone in white (when shrinking/waiting to shrink)
+            if (zoneState.phase() % 2 == 0) {
+                shapes.setColor(1f, 1f, 1f, 0.4f);
+                float nx = startX + (zoneState.nextX() + off) * scale;
+                float ny = startY + (zoneState.nextY() + off) * scale;
+                float nr = Math.max(0, zoneState.nextRadius() * scale);
+                shapes.circle(nx, ny, nr, 30);
+            }
         }
 
         // Local Player point
