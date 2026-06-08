@@ -635,7 +635,8 @@ public final class NetworkClient {
                     byte entityType = raw.readByte();
 
                     if (entityType == UdpOpcodes.ENTITY_PLAYER) {
-                        if (!raw.isReadable(27)) break;
+                        // FIX: Increased from 27 to 32 bytes to account for 16-bit inventory slots
+                        if (!raw.isReadable(32)) break;
                         float x = raw.readFloat(); float y = raw.readFloat();
                         float aim = raw.readFloat(); raw.skipBytes(1);
                         int hp = raw.readUnsignedShort(); int maxHp = raw.readUnsignedShort();
@@ -643,9 +644,10 @@ public final class NetworkClient {
                         int anim = raw.readUnsignedByte();
                         int[] inv = new int[5];
                         for (int k = 0; k < 5; k++) {
-                            inv[k] = raw.readUnsignedByte();
+                            // FIX: Read UnsignedShort to retrieve rarity data
+                            inv[k] = raw.readUnsignedShort();
                         }
-                        raw.skipBytes(3);// inv
+                        raw.skipBytes(3);// pad
                         accP.add(new SnapshotPlayer(entityId, x, y, aim, hp, maxHp, selectedSlot, anim, inv));
                     } else if (entityType == UdpOpcodes.ENTITY_ITEM_ON_GROUND) {
                         if (!raw.isReadable(11)) break;

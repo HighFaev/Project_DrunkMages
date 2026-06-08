@@ -112,23 +112,19 @@ public class GameHUD {
         hudMatrix.setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
 
         hudFont.getData().setScale(1.4f); // Bigger font
+
+        // FIX: The color MUST be set before GlyphLayout is initialized!
+        hudFont.setColor(color);
         com.badlogic.gdx.graphics.g2d.GlyphLayout layout = new com.badlogic.gdx.graphics.g2d.GlyphLayout(hudFont, tooltipText);
+
         float textW = layout.width;
         float textH = layout.height;
         float x = (Gdx.graphics.getWidth() - textW) / 2f;
         float y = 180f; // Floating nicely above the inventory
 
-        // Draw dark background box for readability
-        Gdx.gl.glEnable(GL20.GL_BLEND);
-        shapes.setProjectionMatrix(hudMatrix);
-        shapes.begin(ShapeRenderer.ShapeType.Filled);
-        shapes.setColor(0f, 0f, 0f, 0.85f);
-        shapes.rect(x - 12, y - textH - 12, textW + 24, textH + 24);
-        shapes.end();
-
         batch.setProjectionMatrix(hudMatrix);
         batch.begin();
-        hudFont.setColor(color);
+        // Color was already applied to the layout, so it will draw correctly now
         hudFont.draw(batch, layout, x, y);
         hudFont.getData().setScale(1.1f); // Reset font scale
         batch.end();
@@ -157,9 +153,9 @@ public class GameHUD {
         // Current zone
         if (zoneState != null) {
             shapes.setColor(0.2f, 0.4f, 1f, 0.3f);
-            float zx = startX + (zoneState.curX() + off) * scale;
-            float zy = startY + (zoneState.curY() + off) * scale;
-            float zr = Math.max(0, zoneState.curRadius() * scale);
+            float zx = startX + (zoneState.nextX() + off) * scale;
+            float zy = startY + (zoneState.nextY() + off) * scale;
+            float zr = Math.max(0, zoneState.nextRadius() * scale);
             shapes.circle(zx, zy, zr, 30);
         }
 
@@ -172,17 +168,6 @@ public class GameHUD {
         }
         shapes.end();
 
-        // Next zone border
-        if (zoneState != null && zoneState.phase() % 2 == 0) {
-            shapes.begin(ShapeRenderer.ShapeType.Line);
-            shapes.setColor(Color.WHITE);
-            float nx = startX + (zoneState.nextX() + off) * scale;
-            float ny = startY + (zoneState.nextY() + off) * scale;
-            float nr = Math.max(0, zoneState.nextRadius() * scale);
-            shapes.circle(nx, ny, nr, 30);
-            shapes.end();
-        }
-
         // Draw Player and Kill Stats Directly Underneath the Minimap
         batch.setProjectionMatrix(hudMatrix); // FIX: Ensure text uses HUD matrix
         batch.begin();
@@ -192,7 +177,7 @@ public class GameHUD {
         batch.end();
     }
 
-    private final TextureRegion slotNormal = solidRegion(0.15f, 0.15f, 0.2f);
+    private final float[] slotScales = new float[]{1f, 1f, 1f, 1f, 1f};
     private final TextureRegion slotSelected = solidRegion(0.4f, 0.4f, 0.2f);
 
     public void drawInventory(ShapeRenderer shapes, int[] inventory, int selectedSlot, int hp, int maxHp) {
@@ -204,7 +189,14 @@ public class GameHUD {
 
         int hbWidth = totalWidth;
         int hbHeight = 16;
-        int hbY = startY + slotSize + 12;
+        int hbY = startY + slotSize + 22; // Lifted slightly to give room to expanded selected icons
+
+        // Update animation scales: Lerp towards 1.25f if selected, or 1.0f if not
+        float dt = Gdx.graphics.getDeltaTime();
+        for (int i = 0; i < inventory.length; i++) {
+            float targetScale = (i == selectedSlot) ? 1.25f : 1.0f;
+            slotScales[i] += (targetScale - slotScales[i]) * 15f * dt;
+        }
 
         Gdx.gl.glEnable(GL20.GL_BLEND);
         hudMatrix.setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -219,68 +211,69 @@ public class GameHUD {
             shapes.setColor(0.8f, 0.2f, 0.2f, 0.9f);
             shapes.rect(startX, hbY, hbWidth * percent, hbHeight);
         }
-        shapes.end();
 
-        batch.setProjectionMatrix(hudMatrix);
-        batch.begin();
-
-        hudFont.getData().setScale(0.8f);
-        hudFont.setColor(Color.WHITE);
-        hudFont.draw(batch, Math.max(0, hp) + " / " + maxHp, startX + hbWidth / 2f - 20f, hbY + 13f);
-        hudFont.getData().setScale(1.1f);
-
-        // Draw Item Slots
+        // Draw Item Slots (Fully Colored Backgrounds)
         for (int i = 0; i < inventory.length; i++) {
-            int x = startX + i * (slotSize + spacing);
+            float scale = slotScales[i];
+            float size = slotSize * scale;
+            float cx = startX + i * (slotSize + spacing) + slotSize / 2f;
+            float cy = startY + slotSize / 2f;
+            float bx = cx - size / 2f;
+            float by = cy - size / 2f;
 
-            // --- Color the inventory square ---
             int itemData = inventory[i];
             int baseType = itemData & 0xFF;
             int rarity = (itemData >> 8) & 0xFF;
 
             if (baseType != 0 && baseType != 1) {
                 Color rc = getRarityColor(rarity);
-                batch.setColor(rc.r, rc.g, rc.b, 0.75f); // Tint the square
+                shapes.setColor(rc.r, rc.g, rc.b, 0.9f); // Full colored gun rarity
             } else {
-                batch.setColor(Color.WHITE); // Default empty/starter color
+                shapes.setColor(0.2f, 0.2f, 0.25f, 0.9f); // Default empty/basic item color
             }
 
-            batch.draw((i == selectedSlot) ? slotSelected : slotNormal, x, startY, slotSize, slotSize);
-            batch.setColor(Color.WHITE); // Reset color for drawing text/weapons
+            shapes.rect(bx, by, size, size);
+        }
+        shapes.end();
 
-            hudFont.getData().setScale(0.8f);
-            hudFont.setColor(Color.LIGHT_GRAY);
-            hudFont.draw(batch, String.valueOf(i + 1), x + 4, startY + slotSize - 4);
-            hudFont.getData().setScale(1.1f);
+        // Draw Text and Weapon Icons on top of the backgrounds
+        batch.setProjectionMatrix(hudMatrix);
+        batch.begin();
+
+        hudFont.getData().setScale(0.8f);
+        hudFont.setColor(Color.WHITE);
+        hudFont.draw(batch, Math.max(0, hp) + " / " + maxHp, startX + hbWidth / 2f - 20f, hbY + 13f);
+
+        for (int i = 0; i < inventory.length; i++) {
+            float scale = slotScales[i];
+            float size = slotSize * scale;
+            float cx = startX + i * (slotSize + spacing) + slotSize / 2f;
+            float cy = startY + slotSize / 2f;
+            float bx = cx - size / 2f;
+            float by = cy - size / 2f;
+
+            int itemData = inventory[i];
+            int baseType = itemData & 0xFF;
+
+            hudFont.getData().setScale(0.8f * scale);
+            hudFont.setColor(Color.WHITE);
+            hudFont.draw(batch, String.valueOf(i + 1), bx + 4 * scale, by + size - 4 * scale);
 
             if (baseType != 0) {
                 Texture weaponTex = getWeaponTexture(baseType);
                 if (weaponTex != null) {
-                    batch.draw(weaponTex, x + 4, startY + 4, 40, 40);
+                    float texSize = 40 * scale;
+                    float tx = cx - texSize / 2f;
+                    float ty = cy - texSize / 2f;
+                    batch.draw(weaponTex, tx, ty, texSize, texSize);
                 } else {
                     hudFont.setColor(Color.WHITE);
-                    hudFont.draw(batch, "Item", x + 6, startY + 28);
+                    hudFont.draw(batch, "Item", bx + 6 * scale, by + 28 * scale);
                 }
             }
         }
+        hudFont.getData().setScale(1.1f);
         batch.end();
-
-        // Draw Prominent Colored Borders Over Filled Slots
-        Gdx.gl.glEnable(GL20.GL_BLEND);
-        shapes.setProjectionMatrix(hudMatrix);
-        shapes.begin(ShapeRenderer.ShapeType.Line);
-        Gdx.gl.glLineWidth(3f);
-        for (int i = 0; i < inventory.length; i++) {
-            int baseType = inventory[i] & 0xFF;
-            int rarity = (inventory[i] >> 8) & 0xFF;
-            if (baseType != 0 && baseType != 1) {
-                int x = startX + i * (slotSize + spacing);
-                shapes.setColor(getRarityColor(rarity));
-                shapes.rect(x, startY, slotSize, slotSize);
-            }
-        }
-        shapes.end();
-        Gdx.gl.glLineWidth(1f);
     }
 
     public void hideDeathScreen() {

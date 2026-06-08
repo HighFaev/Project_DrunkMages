@@ -45,9 +45,9 @@ final class WorldSnapshotCodec {
             payload.writeByte(ps.selectedSlot);       // 1 byte
             payload.writeByte(ps.isShooting ? 3 : 0); // 1 byte
             for (int slot = 0; slot < 5; slot++) {
-                payload.writeByte(ps.inventory[slot]);// 5 bytes
+                payload.writeShort(ps.inventory[slot]); // 10 bytes total
             }
-            payload.writeMedium(0);                   // 3 bytes padding
+            payload.writeMedium(0);                  // 3 bytes padding
 
             encodedCount++;
         }
