@@ -130,7 +130,7 @@ public class GameHUD {
         batch.end();
     }
 
-    public void drawMinimapAndStats(ShapeRenderer shapes, float pX, float pY, NetworkClient.GameUdpClient.ZoneStateUdpPacket zoneState, int kills, int aliveCount) {
+    public void drawMinimapAndStats(ShapeRenderer shapes, float pX, float pY, NetworkClient.GameUdpClient.ZoneStateUdpPacket zoneState, int kills, int aliveCount, int serverTick) {
         float mapSize = 160f;
         float pad = 15f;
         float screenH = Gdx.graphics.getHeight();
@@ -150,25 +150,6 @@ public class GameHUD {
         float scale = mapSize / arenaSize;
         float off = GameConstants.ARENA_HALF;
 
-        // Current zone
-        if (zoneState != null) {
-            // Draw current zone in blue
-            shapes.setColor(0.2f, 0.4f, 1f, 0.3f);
-            float cx = startX + (zoneState.curX() + off) * scale;
-            float cy = startY + (zoneState.curY() + off) * scale;
-            float cr = Math.max(0, zoneState.curRadius() * scale);
-            shapes.circle(cx, cy, cr, 30);
-
-            // Draw next zone in white (when shrinking/waiting to shrink)
-            if (zoneState.phase() % 2 == 0) {
-                shapes.setColor(1f, 1f, 1f, 0.4f);
-                float nx = startX + (zoneState.nextX() + off) * scale;
-                float ny = startY + (zoneState.nextY() + off) * scale;
-                float nr = Math.max(0, zoneState.nextRadius() * scale);
-                shapes.circle(nx, ny, nr, 30);
-            }
-        }
-
         // Local Player point
         shapes.setColor(Color.YELLOW);
         float mx = startX + (pX + off) * scale;
@@ -178,12 +159,49 @@ public class GameHUD {
         }
         shapes.end();
 
-        // Draw Player and Kill Stats Directly Underneath the Minimap
-        batch.setProjectionMatrix(hudMatrix); // FIX: Ensure text uses HUD matrix
+        // Zone Outlines (Empty Circles)
+        if (zoneState != null) {
+            shapes.begin(ShapeRenderer.ShapeType.Line);
+
+            // Draw current zone outline (Solid Blue)
+            shapes.setColor(0.2f, 0.4f, 1f, 1f);
+            float cx = startX + (zoneState.curX() + off) * scale;
+            float cy = startY + (zoneState.curY() + off) * scale;
+            float cr = Math.max(0, zoneState.curRadius() * scale);
+            shapes.circle(cx, cy, cr, 60);
+
+            // Draw next zone outline if it's smaller (no longer hiding it arbitrarily!)
+            if (zoneState.nextRadius() < zoneState.curRadius()) {
+                shapes.setColor(1f, 1f, 1f, 1f);
+                float nx = startX + (zoneState.nextX() + off) * scale;
+                float ny = startY + (zoneState.nextY() + off) * scale;
+                float nr = Math.max(0, zoneState.nextRadius() * scale);
+                shapes.circle(nx, ny, nr, 60);
+            }
+
+            shapes.end();
+        }
+
+        // Draw Player, Kill Stats, and Zone Timers Directly Underneath the Minimap
+        batch.setProjectionMatrix(hudMatrix);
         batch.begin();
         hudFont.setColor(Color.WHITE);
         hudFont.draw(batch, "Players Alive: " + aliveCount, startX, startY - 10f);
         hudFont.draw(batch, "Kills: " + kills, startX, startY - 30f);
+
+        // Timer Logic
+        if (zoneState != null) {
+            int ticksUntilShrink = zoneState.shrinkStartTick() - serverTick;
+            int ticksUntilEnd = zoneState.shrinkEndTick() - serverTick;
+
+            if (ticksUntilShrink > 0) {
+                hudFont.setColor(Color.WHITE);
+                hudFont.draw(batch, "Zone shrinks in: " + (ticksUntilShrink / 20) + "s", startX, startY - 50f);
+            } else if (ticksUntilEnd > 0) {
+                hudFont.setColor(Color.RED);
+                hudFont.draw(batch, "Zone is shrinking!: " + (ticksUntilEnd / 20) + "s", startX, startY - 50f);
+            }
+        }
         batch.end();
     }
 

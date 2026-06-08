@@ -203,11 +203,16 @@ public final class GameScreen implements Screen {
         // 3. Draw HUD
         updateHUD();
         ClientPlayer meLocal = players[matchInfo.localMatchPlayerId() & 0xff];
+        NetworkClient.UdpHud udpInfo = game.udp.snapshotPeek();
+        int serverTick = (udpInfo != null) ? udpInfo.serverTick() : 0;
+
         if (meLocal != null) {
             hud.drawInventory(shapes, meLocal.inventory, meLocal.selectedSlot, meLocal.hp, meLocal.maxHp);
-            hud.drawMinimapAndStats(shapes, meLocal.x, meLocal.y, game.udp.zonePeek(), myKills, aliveCount);
+            // Pass serverTick at the end
+            hud.drawMinimapAndStats(shapes, meLocal.x, meLocal.y, game.udp.zonePeek(), myKills, aliveCount, serverTick);
         } else {
-            hud.drawMinimapAndStats(shapes, myX, myY, game.udp.zonePeek(), myKills, aliveCount);
+            // Pass serverTick at the end
+            hud.drawMinimapAndStats(shapes, myX, myY, game.udp.zonePeek(), myKills, aliveCount, serverTick);
         }
         hud.stage.act(delta);
         hud.stage.draw();
@@ -431,29 +436,11 @@ public final class GameScreen implements Screen {
 
     private void updateHUD() {
         NetworkClient.UdpHud udpInfo = game.udp.snapshotPeek();
-        ClientPlayer me = players[matchInfo.localMatchPlayerId() & 0xff];
-
         String line1 = (udpInfo == null) ? "UDP: waiting for snapshot…"
                 : "tick=" + udpInfo.serverTick() + "  entities=" + udpInfo.entityCount();
-        String line2 = "";
 
-
-        NetworkClient.GameUdpClient.ZoneStateUdpPacket zone = game.udp.zonePeek();
-        if (zone != null && udpInfo != null) {
-            int ticksUntilShrink = zone.shrinkStartTick() - udpInfo.serverTick();
-            int ticksUntilEnd = zone.shrinkEndTick() - udpInfo.serverTick();
-            if (ticksUntilShrink > 0) {
-                line2 = "Zone shrinks in: " + (ticksUntilShrink / 20) + "s";
-            } else if (ticksUntilEnd > 0) {
-                line2 = "Zone is shrinking! (" + (ticksUntilEnd / 20) + "s)";
-            } else {
-                line2 = "Zone Phase " + zone.phase();
-            }
-        }
-
-//        String line4 = "WASD move  ·  mouse aim  ·  LMB shoot  ·  Esc leave";
-
-        hud.drawText(line1, line2, "");
+        // Remove the old line2 timer entirely
+        hud.drawText(line1, "", "");
     }
 
     @Override public void resize(int width, int height) {

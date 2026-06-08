@@ -613,19 +613,14 @@ public final class NetworkClient {
                 UdpHeader head = UdpHeader.read(raw);
 
                 if (head.type() != UdpOpcodes.S_WORLD_SNAPSHOT) {
-
-
                     raw.resetReaderIndex();
-
                     return;
-
-
                 }
-
-
                 raw.readUnsignedByte();
-
                 int entityBurst = raw.readUnsignedByte();
+
+                // FIX: Actually save the server tick so the HUD timer updates!
+                lastPeek.set(new UdpHud(head.seqUnsigned(), head.tickUnsigned(), entityBurst));
 
                 ArrayList<SnapshotPlayer> accP = new ArrayList<>();
                 ArrayList<SnapshotItem> accI = new ArrayList<>();
