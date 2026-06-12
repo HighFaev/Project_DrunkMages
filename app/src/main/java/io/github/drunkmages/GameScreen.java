@@ -70,16 +70,17 @@ public final class GameScreen implements Screen {
         worldRenderer.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
 
         // Setup input to hit HUD first, then local keyboard (Esc key)
-        Gdx.input.setInputProcessor(new InputMultiplexer(hud.stage, new InputAdapter() {
-            @Override
-            public boolean keyDown(int keycode) {
-                if (keycode == Keys.ESCAPE) {
-                    game.disconnect();
-                    return true;
-                }
-                return false;
-            }
-        }));
+//        Gdx.input.setInputProcessor(new InputMultiplexer(hud.stage, new InputAdapter() {
+//            @Override
+//            public boolean keyDown(int keycode) {
+//                if (keycode == Keys.ESCAPE) {
+//                    game.disconnect();
+//                    return true;
+//                }
+//                return false;
+//            }
+//        }));
+        Gdx.input.setInputProcessor(new InputMultiplexer(hud.stage));
     }
 
     @Override
@@ -166,7 +167,7 @@ public final class GameScreen implements Screen {
         }
 
         // F to Pickup now guarded by aiming requirement
-        if (Gdx.input.isKeyJustPressed(Keys.F) && aimedItem != null) {
+        if (Gdx.input.isKeyJustPressed(GameSettings.keyInteract) && aimedItem != null) {
             game.udp.sendPickupRequest();
         }
 
@@ -261,10 +262,10 @@ public final class GameScreen implements Screen {
 
     private void processInputAndNetwork(float delta) {
         int buttons = 0;
-        if (Gdx.input.isKeyPressed(Keys.W)) buttons |= 2; // BTN_DOWN
-        if (Gdx.input.isKeyPressed(Keys.S)) buttons |= 1; // BTN_UP
-        if (Gdx.input.isKeyPressed(Keys.A)) buttons |= 4; // BTN_LEFT
-        if (Gdx.input.isKeyPressed(Keys.D)) buttons |= 8; // BTN_RIGHT
+        if (Gdx.input.isKeyPressed(GameSettings.keyUp)) buttons |= 1; // BTN_UP
+        if (Gdx.input.isKeyPressed(GameSettings.keyDown)) buttons |= 2; // BTN_DOWN
+        if (Gdx.input.isKeyPressed(GameSettings.keyLeft)) buttons |= 4; // BTN_LEFT
+        if (Gdx.input.isKeyPressed(GameSettings.keyRight)) buttons |= 8; // BTN_RIGHT
 
         List<NetworkClient.SnapshotPlayer> snap = game.udp.snapshotPlayersPeek();
         int selfSlot = matchInfo.localMatchPlayerId();
@@ -319,6 +320,13 @@ public final class GameScreen implements Screen {
             if (Gdx.input.isKeyJustPressed(Keys.NUM_3)) { me.selectedSlot = 2; game.udp.sendSwitchWeaponRequest(2); }
             if (Gdx.input.isKeyJustPressed(Keys.NUM_4)) { me.selectedSlot = 3; game.udp.sendSwitchWeaponRequest(3); }
             if (Gdx.input.isKeyJustPressed(Keys.NUM_5)) { me.selectedSlot = 4; game.udp.sendSwitchWeaponRequest(4); }
+
+            if (Gdx.input.isKeyJustPressed(GameSettings.keyDrop)) {
+                game.udp.sendDropRequest(me.selectedSlot);
+            }
+            if (Gdx.input.isKeyJustPressed(GameSettings.keyReload)) {
+                game.udp.sendReloadRequest(me.selectedSlot); // Not fully implemented in MatchRuntime but sends properly now
+            }
         }
 
         // Mouse aiming

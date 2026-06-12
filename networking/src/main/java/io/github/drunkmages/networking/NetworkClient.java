@@ -593,6 +593,27 @@ public final class NetworkClient {
         }
 
 
+        public void sendDropRequest(int slot) {
+            Channel z = cannon_; InetSocketAddress bull = aim_;
+            if (!active.get() || z == null || !z.isActive() || bull == null) return;
+            seqOutbound_++;
+            ByteBuf buf = z.alloc().buffer(UdpOpcodes.HEADER_BYTES + 2);
+            UdpHeader.write(buf, UdpOpcodes.C_ITEM_DROP, seqOutbound_, 0, warriorSlot_, matchXor_);
+            buf.writeByte(slot);
+            buf.writeByte(0); // 0 = drop all of stack
+            z.writeAndFlush(new DatagramPacket(buf, bull));
+        }
+
+        public void sendReloadRequest(int weaponSlot) {
+            Channel z = cannon_; InetSocketAddress bull = aim_;
+            if (!active.get() || z == null || !z.isActive() || bull == null) return;
+            seqOutbound_++;
+            ByteBuf buf = z.alloc().buffer(UdpOpcodes.HEADER_BYTES + 1);
+            UdpHeader.write(buf, UdpOpcodes.C_RELOAD, seqOutbound_, 0, warriorSlot_, matchXor_);
+            buf.writeByte(weaponSlot);
+            z.writeAndFlush(new DatagramPacket(buf, bull));
+        }
+
         private void decodeWorldSnapshot(ByteBuf raw) {
 
 

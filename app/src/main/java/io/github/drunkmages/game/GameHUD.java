@@ -141,6 +141,9 @@ public class GameHUD {
         addKeybindRow(settingsMenu, "Move Left", GameSettings.keyLeft, code -> GameSettings.keyLeft = code, skin);
         addKeybindRow(settingsMenu, "Move Right", GameSettings.keyRight, code -> GameSettings.keyRight = code, skin);
         addKeybindRow(settingsMenu, "Interact/Pickup", GameSettings.keyInteract, code -> GameSettings.keyInteract = code, skin);
+        addKeybindRow(settingsMenu, "Drop Item", GameSettings.keyDrop, code -> GameSettings.keyDrop = code, skin);
+        addKeybindRow(settingsMenu, "Reload", GameSettings.keyReload, code -> GameSettings.keyReload = code, skin);
+
 
         TextButton closeSettingsBtn = new TextButton("Close", skin);
         settingsMenu.add(closeSettingsBtn).colspan(2).padTop(15).fillX();
@@ -501,10 +504,16 @@ public class GameHUD {
     private static Skin buildButtonSkin(BitmapFont font) {
         Skin skin = new Skin();
         skin.add("default-font", font, BitmapFont.class);
+
+        // Base textures/colors
         skin.add("btn-n", solidRegion(0.20f, 0.20f, 0.35f));
         skin.add("btn-o", solidRegion(0.30f, 0.20f, 0.30f));
         skin.add("btn-d", solidRegion(0.13f, 0.13f, 0.22f));
+        skin.add("bg", solidRegion(0.15f, 0.15f, 0.22f)); // Dark background for Windows
+        skin.add("check-on", solidRegion(0.40f, 0.80f, 0.40f)); // Green for checked box
+        skin.add("check-off", solidRegion(0.40f, 0.40f, 0.40f)); // Gray for unchecked box
 
+        // 1. TextButton Style (Already existed)
         TextButton.TextButtonStyle tbs = new TextButton.TextButtonStyle();
         tbs.font = font;
         tbs.fontColor = Color.WHITE;
@@ -512,6 +521,32 @@ public class GameHUD {
         tbs.over = skin.newDrawable("btn-o");
         tbs.down = skin.newDrawable("btn-d");
         skin.add("default", tbs, TextButton.TextButtonStyle.class);
+
+        // 2. Label Style (Fixes your exact crash)
+        Label.LabelStyle ls = new Label.LabelStyle();
+        ls.font = font;
+        ls.fontColor = Color.WHITE;
+        skin.add("default", ls, Label.LabelStyle.class);
+
+        // 3. Window Style (Required for the escape/settings menus)
+        Window.WindowStyle ws = new Window.WindowStyle();
+        ws.titleFont = font;
+        ws.titleFontColor = Color.WHITE;
+        ws.background = skin.newDrawable("bg");
+        skin.add("default", ws, Window.WindowStyle.class);
+
+        // 4. CheckBox Style (Required for the Tutorial Toggle)
+        CheckBox.CheckBoxStyle cbs = new CheckBox.CheckBoxStyle();
+        cbs.font = font;
+        cbs.fontColor = Color.WHITE;
+        cbs.checkboxOn = skin.newDrawable("check-on");
+        cbs.checkboxOn.setMinWidth(20f);
+        cbs.checkboxOn.setMinHeight(20f);
+        cbs.checkboxOff = skin.newDrawable("check-off");
+        cbs.checkboxOff.setMinWidth(20f);
+        cbs.checkboxOff.setMinHeight(20f);
+        skin.add("default", cbs, CheckBox.CheckBoxStyle.class);
+
         return skin;
     }
 
