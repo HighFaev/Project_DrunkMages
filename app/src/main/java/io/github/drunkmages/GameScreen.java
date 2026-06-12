@@ -170,6 +170,10 @@ public final class GameScreen implements Screen {
             game.udp.sendPickupRequest();
         }
 
+        if (Gdx.input.isKeyJustPressed(Keys.ESCAPE)) {
+            hud.toggleEscapeMenu();
+        }
+
         // 2. Draw Entities (using the same camera projection)
         shapes.setProjectionMatrix(worldRenderer.camera.combined);
         shapes.begin(ShapeRenderer.ShapeType.Filled);

@@ -17,6 +17,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField.TextFieldStyle;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
+import io.github.drunkmages.game.GameSettings;
 
 /**
  * The first screen the player sees.  Three fields:
@@ -145,6 +146,7 @@ public final class ConnectScreen implements Screen {
 
         // Focus nickname first if host is already filled, else focus host
         stage.setKeyboardFocus(nickField.getText().isEmpty() ? nickField : hostField);
+        GameSettings.load();
     }
 
     @Override

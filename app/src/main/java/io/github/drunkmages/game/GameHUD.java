@@ -1,6 +1,7 @@
 package io.github.drunkmages.game;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
@@ -9,13 +10,14 @@ import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
+import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.InputEvent;
+import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.actions.Actions;
-import com.badlogic.gdx.scenes.scene2d.ui.Label;
-import com.badlogic.gdx.scenes.scene2d.ui.Skin;
-import com.badlogic.gdx.scenes.scene2d.ui.Table;
-import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
+import com.badlogic.gdx.scenes.scene2d.ui.*;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
+import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import io.github.drunkmages.networking.NetworkClient;
 import com.badlogic.gdx.math.Matrix4;
@@ -36,6 +38,11 @@ public class GameHUD {
 
     private final Map<Integer, Texture> weaponTextures = new HashMap<>();
 
+    private Window escapeMenu;
+    private Window settingsMenu;
+    private Label tutorialLabel;
+    private boolean isRebinding = false;
+
     public GameHUD(Runnable onLeaveClicked) {
         batch = new SpriteBatch();
         hudFont = new BitmapFont();
@@ -46,13 +53,15 @@ public class GameHUD {
         skin = buildButtonSkin(hudFont);
 
         // 1. Top Right Leave Button
-        Table topRoot = new Table();
-        topRoot.setFillParent(true);
-        stage.addActor(topRoot);
-        TextButton leaveBtn = new TextButton("Leave match", skin);
-        leaveBtn.addListener(new ChangeListener() { @Override public void changed(ChangeEvent e, com.badlogic.gdx.scenes.scene2d.Actor a) { onLeaveClicked.run(); } });
-        topRoot.top().right().pad(14f);
-        topRoot.add(leaveBtn).width(150f).height(38f);
+//        Table topRoot = new Table();
+//        topRoot.setFillParent(true);
+//        stage.addActor(topRoot);
+//        TextButton leaveBtn = new TextButton("Leave match", skin);
+//        leaveBtn.addListener(new ChangeListener() { @Override public void changed(ChangeEvent e, com.badlogic.gdx.scenes.scene2d.Actor a) { onLeaveClicked.run(); } });
+//        topRoot.top().right().pad(14f);
+//        topRoot.add(leaveBtn).width(150f).height(38f);
+
+        setupUI(skin);
 
         // 2. Kill Feed Table
         killFeed = new Table();
@@ -77,6 +86,160 @@ public class GameHUD {
             weaponTextures.put(4, new Texture(Gdx.files.internal("weapons/ar.png")));
         } catch (Exception e) {
             System.err.println("Warning: Could not load weapon textures. Did you put them in src/main/resources/weapons/ ?");
+        }
+    }
+
+    public void setupUI(Skin skin) {
+        // 1. Remove the old leave game button code here
+
+        // 2. Set up the Dynamic Tutorial Label (Bottom Right)
+        tutorialLabel = new Label("", skin);
+        Table tutorialTable = new Table();
+        tutorialTable.setFillParent(true);
+        tutorialTable.bottom().right().pad(20);
+        tutorialTable.add(tutorialLabel);
+        stage.addActor(tutorialTable);
+        updateTutorialText(); // Initialize text
+
+        // 3. Set up the Escape Menu (Hidden by default)
+        escapeMenu = new Window("Paused", skin);
+        escapeMenu.setMovable(false);
+
+        TextButton openSettingsBtn = new TextButton("Settings", skin);
+        TextButton leaveGameBtn = new TextButton("Leave Game", skin);
+
+        escapeMenu.add(openSettingsBtn).fillX().pad(10).row();
+        escapeMenu.add(leaveGameBtn).fillX().pad(10).row();
+        escapeMenu.pack();
+        escapeMenu.setPosition(
+                (Gdx.graphics.getWidth() - escapeMenu.getWidth()) / 2f,
+                (Gdx.graphics.getHeight() - escapeMenu.getHeight()) / 2f
+        );
+        escapeMenu.setVisible(false);
+        stage.addActor(escapeMenu);
+
+        // 4. Setup the Settings Menu (Hidden by default)
+        settingsMenu = new Window("Settings", skin);
+        settingsMenu.setMovable(false);
+
+        CheckBox tutorialToggle = new CheckBox(" Show Tutorial", skin);
+        tutorialToggle.setChecked(GameSettings.showTutorial);
+        tutorialToggle.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                GameSettings.showTutorial = tutorialToggle.isChecked();
+                GameSettings.save();
+                updateTutorialText();
+            }
+        });
+
+        settingsMenu.add(tutorialToggle).colspan(2).padBottom(10).row();
+
+        // Add Keybind Buttons
+        addKeybindRow(settingsMenu, "Move Up", GameSettings.keyUp, code -> GameSettings.keyUp = code, skin);
+        addKeybindRow(settingsMenu, "Move Down", GameSettings.keyDown, code -> GameSettings.keyDown = code, skin);
+        addKeybindRow(settingsMenu, "Move Left", GameSettings.keyLeft, code -> GameSettings.keyLeft = code, skin);
+        addKeybindRow(settingsMenu, "Move Right", GameSettings.keyRight, code -> GameSettings.keyRight = code, skin);
+        addKeybindRow(settingsMenu, "Interact/Pickup", GameSettings.keyInteract, code -> GameSettings.keyInteract = code, skin);
+
+        TextButton closeSettingsBtn = new TextButton("Close", skin);
+        settingsMenu.add(closeSettingsBtn).colspan(2).padTop(15).fillX();
+        settingsMenu.pack();
+        settingsMenu.setPosition(
+                (Gdx.graphics.getWidth() - settingsMenu.getWidth()) / 2f,
+                (Gdx.graphics.getHeight() - settingsMenu.getHeight()) / 2f
+        );
+        settingsMenu.setVisible(false);
+        stage.addActor(settingsMenu);
+
+        // 5. Button Listeners
+        openSettingsBtn.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                escapeMenu.setVisible(false);
+                settingsMenu.setVisible(true);
+            }
+        });
+
+        closeSettingsBtn.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                settingsMenu.setVisible(false);
+                escapeMenu.setVisible(true);
+            }
+        });
+
+        leaveGameBtn.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                // Trigger your existing disconnect/leave game logic here
+            }
+        });
+    }
+
+    private interface KeyBindCallback {
+        void onKeyBound(int keycode);
+    }
+
+    // Helper method to create keybind rows
+    private void addKeybindRow(Window window, String actionName, int currentKey, KeyBindCallback callback, Skin skin) {
+        window.add(new Label(actionName, skin)).pad(5);
+        TextButton bindBtn = new TextButton(GameSettings.getKeyName(currentKey), skin);
+
+        bindBtn.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                if (isRebinding) return; // Prevent multiple rebinding at once
+                isRebinding = true;
+                bindBtn.setText("Press Key...");
+
+                stage.addListener(new InputListener() {
+                    @Override
+                    public boolean keyDown(InputEvent event, int keycode) {
+                        if (keycode == Input.Keys.ESCAPE) return false; // Don't bind Escape
+
+                        callback.onKeyBound(keycode);
+                        GameSettings.save();
+                        bindBtn.setText(GameSettings.getKeyName(keycode));
+                        updateTutorialText(); // Update the bottom-right text
+
+                        isRebinding = false;
+                        stage.removeListener(this); // Stop listening for keys
+                        return true;
+                    }
+                });
+            }
+        });
+        window.add(bindBtn).pad(5).width(100).row();
+    }
+
+    // Updates the dynamic tutorial text
+    public void updateTutorialText() {
+        if (!GameSettings.showTutorial) {
+            tutorialLabel.setVisible(false);
+            return;
+        }
+        tutorialLabel.setVisible(true);
+        tutorialLabel.setText(
+                "TUTORIAL\n" +
+                        "Movement: " + GameSettings.getKeyName(GameSettings.keyUp) +
+                        GameSettings.getKeyName(GameSettings.keyLeft) +
+                        GameSettings.getKeyName(GameSettings.keyDown) +
+                        GameSettings.getKeyName(GameSettings.keyRight) + "\n" +
+                        "Aim & Shoot: Mouse\n" +
+                        "Pick Up/Interact: " + GameSettings.getKeyName(GameSettings.keyInteract) + "\n" +
+                        "Drop Item: " + GameSettings.getKeyName(GameSettings.keyDrop) + "\n" +
+                        "Reload: " + GameSettings.getKeyName(GameSettings.keyReload)
+        );
+    }
+
+    // Toggle method to be called from GameScreen
+    public void toggleEscapeMenu() {
+        if (settingsMenu.isVisible()) {
+            settingsMenu.setVisible(false);
+            escapeMenu.setVisible(true);
+        } else {
+            escapeMenu.setVisible(!escapeMenu.isVisible());
         }
     }
 
