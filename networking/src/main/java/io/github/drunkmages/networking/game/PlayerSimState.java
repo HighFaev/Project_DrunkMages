@@ -17,6 +17,7 @@ final class PlayerSimState {
     volatile int selectedSlot = 0;
     volatile int[] inventory = new int[5];
 
+    volatile float exactHp = 100f;
     volatile int hp = 100;
     final int maxHp = 100;
 

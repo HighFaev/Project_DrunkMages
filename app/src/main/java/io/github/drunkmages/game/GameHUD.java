@@ -487,6 +487,19 @@ public class GameHUD {
 
     public void resize(int width, int height) {
         stage.getViewport().update(width, height, true);
+
+        if (escapeMenu != null) {
+            escapeMenu.setPosition(
+                    Math.round((stage.getWidth() - escapeMenu.getWidth()) / 2f),
+                    Math.round((stage.getHeight() - escapeMenu.getHeight()) / 2f)
+            );
+        }
+        if (settingsMenu != null) {
+            settingsMenu.setPosition(
+                    Math.round((stage.getWidth() - settingsMenu.getWidth()) / 2f),
+                    Math.round((stage.getHeight() - settingsMenu.getHeight()) / 2f)
+            );
+        }
     }
 
     public void dispose() {
@@ -561,10 +574,13 @@ public class GameHUD {
         return weaponTextures.get(itemType & 0xFF);
     }
 
-    public void showDeathScreen(String killerName, Runnable onLeave) {
+    public void showDeathScreen(String killerName, int kills, int placement, Runnable onLeave) {
         deathScreen.clearChildren();
         deathScreen.setVisible(true);
-        deathScreen.add(new Label("YOU DIED", new Label.LabelStyle(hudFont, Color.RED))).padBottom(20f).row();
+
+        deathScreen.add(new Label("BETTER LUCK NEXT TIME", new Label.LabelStyle(hudFont, Color.RED))).padBottom(20f).row();
+        deathScreen.add(new Label("Placement: #" + placement, new Label.LabelStyle(hudFont, Color.GOLD))).padBottom(15f).row();
+        deathScreen.add(new Label("Kills: " + kills, new Label.LabelStyle(hudFont, Color.CYAN))).padBottom(15f).row();
         deathScreen.add(new Label("Killed by: " + killerName, new Label.LabelStyle(hudFont, Color.WHITE))).padBottom(40f).row();
 
         TextButton leaveBtn = new TextButton("Disconnect", skin);
@@ -572,20 +588,25 @@ public class GameHUD {
         deathScreen.add(leaveBtn).width(200f).height(50f).row();
     }
 
-    public void showWinScreen(io.github.drunkmages.networking.MatchEndPacket end, Runnable onLeave) {
+    public void showWinScreen(io.github.drunkmages.networking.MatchEndPacket end, int myKills, boolean isWinner, Runnable onLeave) {
         deathScreen.clearChildren();
         deathScreen.setVisible(true);
-        deathScreen.add(new Label("MATCH OVER", new Label.LabelStyle(hudFont, Color.GOLD))).padBottom(20f).row();
 
-        String winnerText = end.winnerNickname().isEmpty() ? "Nobody (Draw)" : end.winnerNickname();
-        deathScreen.add(new Label("Winner: " + winnerText, new Label.LabelStyle(hudFont, Color.WHITE))).padBottom(15f).row();
+        if (isWinner) {
+            deathScreen.add(new Label("YOU WON!", new Label.LabelStyle(hudFont, Color.GOLD))).padBottom(20f).row();
+            deathScreen.add(new Label("Your Kills: " + myKills, new Label.LabelStyle(hudFont, Color.CYAN))).padBottom(30f).row();
+        } else {
+            deathScreen.add(new Label("MATCH OVER", new Label.LabelStyle(hudFont, Color.GOLD))).padBottom(20f).row();
+            String winnerText = end.winnerNickname().isEmpty() ? "Nobody (Draw)" : end.winnerNickname();
+            deathScreen.add(new Label("Winner: " + winnerText, new Label.LabelStyle(hudFont, Color.WHITE))).padBottom(15f).row();
 
-        int winnerKills = 0;
-        for (io.github.drunkmages.networking.MatchStatEntry s : end.stats()) {
-            if (s.playerId() == end.winnerId()) winnerKills = s.kills();
+            int winnerKills = 0;
+            for (io.github.drunkmages.networking.MatchStatEntry s : end.stats()) {
+                if (s.playerId() == end.winnerId()) winnerKills = s.kills();
+            }
+            deathScreen.add(new Label("Winner Kills: " + winnerKills, new Label.LabelStyle(hudFont, Color.CYAN))).padBottom(30f).row();
         }
 
-        deathScreen.add(new Label("Winner Kills: " + winnerKills, new Label.LabelStyle(hudFont, Color.CYAN))).padBottom(30f).row();
         deathScreen.add(new Label("Match Duration: " + (end.durationTicks() / 20) + "s", new Label.LabelStyle(hudFont, Color.LIGHT_GRAY))).padBottom(40f).row();
 
         TextButton leaveBtn = new TextButton("Back to Lobby", skin);

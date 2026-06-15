@@ -104,6 +104,7 @@ public final class MatchRuntime {
     private static final class ServerProjectile {
         float x, y, vx, vy, life;
         int ownerId;
+        float damage;
     }
     private final ArrayList<ServerProjectile> serverProjectiles = new ArrayList<>();
     private final BiConsumer<Integer, Integer> onDeath;
@@ -255,7 +256,18 @@ public final class MatchRuntime {
 
             if (ps.isShooting && ps.fireCooldown <= 0f) {
                 ps.fireCooldown = weapon.fireRate();
-                // Loop based on projectiles (Shotguns fire 5!)
+
+                // FIX: Calculate custom rarity-based damage
+                float projDamage = 15f;
+                if (currentWeaponType == 3 || currentWeaponType == 4) { // Shotgun or AK
+                    int rarity = (ps.inventory[ps.selectedSlot] >> 8) & 0xFF;
+                    if (rarity == 3) projDamage = 25f;      // Gold
+                    else if (rarity == 2) projDamage = 20f; // Purple
+                    else projDamage = 15f;                  // Basic/White/Green
+                } else if (currentWeaponType == 1) { // Pistol
+                    projDamage = 17.5f;
+                }
+
                 for (int pCount = 0; pCount < weapon.projectiles(); pCount++) {
                     ServerProjectile p = new ServerProjectile();
                     p.x = ps.posX; p.y = ps.posY;
@@ -264,6 +276,7 @@ public final class MatchRuntime {
                     p.vy = (float) Math.sin(angle) * weapon.bulletSpeed();
                     p.life = 2.5f;
                     p.ownerId = ps.entityId;
+                    p.damage = projDamage; // Apply calculated damage to the projectile
                     serverProjectiles.add(p);
                 }
             }
@@ -294,7 +307,9 @@ public final class MatchRuntime {
                 if (target.hp <= 0 || target.entityId == p.ownerId) continue;
                 float dx = target.posX - p.x; float dy = target.posY - p.y;
                 if (dx * dx + dy * dy < 14f * 14f) {
-                    target.hp -= 25; hit = true;
+                    target.exactHp -= p.damage;
+                    target.hp = (int) Math.ceil(target.exactHp);
+                    hit = true;
                     PlayerSimState killer = lookup(p.ownerId);
                     if (killer != null && killer.entityId != target.entityId) killer.damageDealt += 25;
 
@@ -320,7 +335,7 @@ public final class MatchRuntime {
             if (ps.hp <= 0) continue;
             float dx = ps.posX - zone.curX; float dy = ps.posY - zone.curY;
             if (dx * dx + dy * dy > zone.curRadius * zone.curRadius) {
-                ps.hp -= zone.damagePerTick;
+                ps.exactHp -= zone.damagePerTick;
                 if (ps.hp <= 0) {
                     ps.placement = aliveCount;
                     ps.survivalTicks = authoritativeTick;
@@ -542,13 +557,13 @@ public final class MatchRuntime {
                 if (ent.hp <= 0) return true;
                 if (content.isReadable(2)) {
                     int slot = content.readUnsignedByte();
-                    int qty = content.readUnsignedByte(); // Unused for now, drop all
+                    int qty = content.readUnsignedByte();
                     if (slot >= 0 && slot < 5) {
                         int itemType = ent.inventory[slot];
                         int baseType = itemType & 0xFF;
 
-                        // Prevent dropping "nothing" (0) or the basic starter pistol (1)
-                        if (baseType != 0 && baseType != 1) {
+                        // FIX: Allow pistol to drop, only prevent dropping empty hands (0)
+                        if (baseType != 0) {
                             ServerItem drop = new ServerItem();
                             drop.entityId = nextItemEntityId++;
                             drop.itemType = itemType;

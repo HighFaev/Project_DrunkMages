@@ -184,6 +184,14 @@ public final class GameScreen implements Screen {
 
         shapes.end();
 
+        int aliveCount = 0;
+        List<NetworkClient.SnapshotPlayer> snap = game.udp.snapshotPlayersPeek();
+        if (snap != null) {
+            for (NetworkClient.SnapshotPlayer p : snap) {
+                if (p.hp() > 0) aliveCount++;
+            }
+        }
+
         // Handle Death Events
         PlayerDiedTcpPacket death;
         while ((death = game.deathEvents.poll()) != null) {
@@ -192,16 +200,11 @@ public final class GameScreen implements Screen {
                 myKills++;
             }
             hud.addKillFeedEvent(death.victimNickname(), death.killerNickname(), isLocalPlayerKill);
-            if (death.playerId() == matchInfo.localMatchPlayerId()) {
-                hud.showDeathScreen(death.killerNickname(), () -> game.disconnect());
-            }
-        }
 
-        int aliveCount = 0;
-        List<NetworkClient.SnapshotPlayer> snap = game.udp.snapshotPlayersPeek();
-        if (snap != null) {
-            for (NetworkClient.SnapshotPlayer p : snap) {
-                if (p.hp() > 0) aliveCount++;
+            if (death.playerId() == matchInfo.localMatchPlayerId()) {
+                // If 1 person is still alive when you die, you placed 2nd (aliveCount + 1)
+                int placement = aliveCount + 1;
+                hud.showDeathScreen(death.killerNickname(), myKills, placement, () -> game.disconnect());
             }
         }
 
@@ -262,8 +265,8 @@ public final class GameScreen implements Screen {
 
     private void processInputAndNetwork(float delta) {
         int buttons = 0;
-        if (Gdx.input.isKeyPressed(GameSettings.keyUp)) buttons |= 1; // BTN_UP
-        if (Gdx.input.isKeyPressed(GameSettings.keyDown)) buttons |= 2; // BTN_DOWN
+        if (Gdx.input.isKeyPressed(GameSettings.keyUp)) buttons |= 2; // BTN_UP
+        if (Gdx.input.isKeyPressed(GameSettings.keyDown)) buttons |= 1; // BTN_DOWN
         if (Gdx.input.isKeyPressed(GameSettings.keyLeft)) buttons |= 4; // BTN_LEFT
         if (Gdx.input.isKeyPressed(GameSettings.keyRight)) buttons |= 8; // BTN_RIGHT
 
@@ -448,11 +451,6 @@ public final class GameScreen implements Screen {
 
     private void updateHUD() {
         NetworkClient.UdpHud udpInfo = game.udp.snapshotPeek();
-        String line1 = (udpInfo == null) ? "UDP: waiting for snapshot…"
-                : "tick=" + udpInfo.serverTick() + "  entities=" + udpInfo.entityCount();
-
-        // Remove the old line2 timer entirely
-        hud.drawText(line1, "", "");
     }
 
     @Override public void resize(int width, int height) {
@@ -461,7 +459,8 @@ public final class GameScreen implements Screen {
     }
 
     public void showWinScreen(io.github.drunkmages.networking.MatchEndPacket end) {
-        hud.showWinScreen(end, () -> game.disconnect());
+        boolean isWinner = (end.winnerId() == matchInfo.localMatchPlayerId());
+        hud.showWinScreen(end, myKills, isWinner, () -> game.disconnect());
     }
 
     @Override public void hide() { Gdx.input.setInputProcessor(null); }
