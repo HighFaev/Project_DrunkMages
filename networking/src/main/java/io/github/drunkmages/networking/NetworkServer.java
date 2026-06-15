@@ -537,10 +537,13 @@ public final class NetworkServer {
         Map<Integer, String> slotToNick = new java.util.HashMap<>();
         for (LobbyPeer p : participantChannels) slotToNick.put(p.slot, p.info.nickname());
 
-        MatchRuntime rt = new MatchRuntime(wireMidBits, mathsRoster, slotToNick, (victimId, killerId) -> {
+        MatchRuntime rt = new MatchRuntime(wireMidBits, mathsRoster, slotToNick, (victimId, killerId, placement) -> {
             String vNick = slotToNick.getOrDefault(victimId, "Unknown");
             String kNick = killerId == 0 ? "Environment" : slotToNick.getOrDefault(killerId, "Unknown");
-            ByteBuf buf = LobbyTcpOutbound.playerDied(UDP.alloc(), victimId, vNick, killerId, kNick, 0);
+
+            // FIX: Pass the 'placement' variable instead of the hardcoded 0
+            ByteBuf buf = LobbyTcpOutbound.playerDied(UDP.alloc(), victimId, vNick, killerId, kNick, placement);
+
             for (LobbyPeer peer : participantChannels) {
                 peer.socket().writeAndFlush(buf.retainedDuplicate());
             }

@@ -202,9 +202,8 @@ public final class GameScreen implements Screen {
             hud.addKillFeedEvent(death.victimNickname(), death.killerNickname(), isLocalPlayerKill);
 
             if (death.playerId() == matchInfo.localMatchPlayerId()) {
-                // If 1 person is still alive when you die, you placed 2nd (aliveCount + 1)
-                int placement = aliveCount + 1;
-                hud.showDeathScreen(death.killerNickname(), myKills, placement, () -> game.disconnect());
+                // FIX: Use the authoritative placement from the server's packet!
+                hud.showDeathScreen(death.killerNickname(), myKills, death.placement(), () -> game.disconnect());
             }
         }
 

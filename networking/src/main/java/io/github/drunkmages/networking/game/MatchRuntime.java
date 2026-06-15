@@ -106,8 +106,13 @@ public final class MatchRuntime {
         int ownerId;
         float damage;
     }
+
+    public interface DeathCallback {
+        void onDeath(int victimId, int killerId, int placement);
+    }
+
     private final ArrayList<ServerProjectile> serverProjectiles = new ArrayList<>();
-    private final BiConsumer<Integer, Integer> onDeath;
+    private final DeathCallback onDeath;
     private final java.util.function.Consumer<MatchEndPacket> onMatchEnd;
     private final java.util.Map<Integer, String> slotToNick;
     private boolean matchEnded = false;
@@ -122,7 +127,7 @@ public final class MatchRuntime {
 
     // ── Constructor ──────────────────────────────────────────────────────────
 
-    public MatchRuntime(int matchWireSignedInt, List<MatchParticipant> rosterUnsorted, Map<Integer, String> slotToNick, BiConsumer<Integer, Integer> onDeath, Consumer<MatchEndPacket> onMatchEnd) {
+    public MatchRuntime(int matchWireSignedInt, List<MatchParticipant> rosterUnsorted, Map<Integer, String> slotToNick, DeathCallback onDeath, Consumer<MatchEndPacket> onMatchEnd) {
         this.onDeath = onDeath;
         this.onMatchEnd = onMatchEnd;
         this.slotToNick = slotToNick;
@@ -317,7 +322,7 @@ public final class MatchRuntime {
                         target.placement = aliveCount;
                         target.survivalTicks = authoritativeTick;
                         if (killer != null && killer.entityId != target.entityId) killer.kills++;
-                        onDeath.accept(target.entityId, p.ownerId);
+                        onDeath.onDeath(target.entityId, p.ownerId, target.placement);
                         aliveCount--;
                     }
                     break;
@@ -339,7 +344,7 @@ public final class MatchRuntime {
                 if (ps.hp <= 0) {
                     ps.placement = aliveCount;
                     ps.survivalTicks = authoritativeTick;
-                    onDeath.accept(ps.entityId, 0);
+                    onDeath.onDeath(ps.entityId, 0, ps.placement);
                     aliveCount--;
                 }
             }
