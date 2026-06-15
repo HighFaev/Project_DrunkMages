@@ -90,8 +90,6 @@ public class GameHUD {
     }
 
     public void setupUI(Skin skin) {
-        // 1. Remove the old leave game button code here
-
         // 2. Set up the Dynamic Tutorial Label (Bottom Right)
         tutorialLabel = new Label("", skin);
         Table tutorialTable = new Table();
@@ -99,7 +97,7 @@ public class GameHUD {
         tutorialTable.bottom().right().pad(20);
         tutorialTable.add(tutorialLabel);
         stage.addActor(tutorialTable);
-        updateTutorialText(); // Initialize text
+        updateTutorialText();
 
         // 3. Set up the Escape Menu (Hidden by default)
         escapeMenu = new Window("Paused", skin);
@@ -142,12 +140,13 @@ public class GameHUD {
         addKeybindRow(settingsMenu, "Move Right", GameSettings.keyRight, code -> GameSettings.keyRight = code, skin);
         addKeybindRow(settingsMenu, "Interact/Pickup", GameSettings.keyInteract, code -> GameSettings.keyInteract = code, skin);
         addKeybindRow(settingsMenu, "Drop Item", GameSettings.keyDrop, code -> GameSettings.keyDrop = code, skin);
-        addKeybindRow(settingsMenu, "Reload", GameSettings.keyReload, code -> GameSettings.keyReload = code, skin);
+//        addKeybindRow(settingsMenu, "Reload", GameSettings.keyReload, code -> GameSettings.keyReload = code, skin);
 
 
         TextButton closeSettingsBtn = new TextButton("Close", skin);
         settingsMenu.add(closeSettingsBtn).colspan(2).padTop(15).fillX();
         settingsMenu.pack();
+        settingsMenu.setSize(500, 400);
         settingsMenu.setPosition(
                 (Gdx.graphics.getWidth() - settingsMenu.getWidth()) / 2f,
                 (Gdx.graphics.getHeight() - settingsMenu.getHeight()) / 2f
@@ -231,8 +230,8 @@ public class GameHUD {
                         GameSettings.getKeyName(GameSettings.keyRight) + "\n" +
                         "Aim & Shoot: Mouse\n" +
                         "Pick Up/Interact: " + GameSettings.getKeyName(GameSettings.keyInteract) + "\n" +
-                        "Drop Item: " + GameSettings.getKeyName(GameSettings.keyDrop) + "\n" +
-                        "Reload: " + GameSettings.getKeyName(GameSettings.keyReload)
+                        "Drop Item: " + GameSettings.getKeyName(GameSettings.keyDrop) + "\n"
+//                        "Reload: " + GameSettings.getKeyName(GameSettings.keyReload)
         );
     }
 

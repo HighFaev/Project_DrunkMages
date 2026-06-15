@@ -42,9 +42,9 @@ public class ClientPlayer {
     }
 
     public void draw(ShapeRenderer shapes, float mouseAimAngle) {
-        if (hp <= 0) return; // Don't draw dead players
+        if (hp <= 0) return;
 
-        Color bodyColor = isColliding ? GameConstants.COLOR_COLLIDE : (isSelf ? GameConstants.COLOR_SELF : GameConstants.COLOR_OTHER);
+        Color bodyColor = isSelf ? GameConstants.COLOR_SELF : GameConstants.COLOR_OTHER;
         shapes.setColor(bodyColor);
         shapes.circle(x, y, GameConstants.PLAYER_RADIUS, 20);
 

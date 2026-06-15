@@ -324,9 +324,9 @@ public final class GameScreen implements Screen {
             if (Gdx.input.isKeyJustPressed(GameSettings.keyDrop)) {
                 game.udp.sendDropRequest(me.selectedSlot);
             }
-            if (Gdx.input.isKeyJustPressed(GameSettings.keyReload)) {
-                game.udp.sendReloadRequest(me.selectedSlot); // Not fully implemented in MatchRuntime but sends properly now
-            }
+//            if (Gdx.input.isKeyJustPressed(GameSettings.keyReload)) {
+//                game.udp.sendReloadRequest(me.selectedSlot); // Not fully implemented in MatchRuntime but sends properly now
+//            }
         }
 
         // Mouse aiming

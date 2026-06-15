@@ -538,6 +538,30 @@ public final class MatchRuntime {
                 return true;
             }
 
+            if (header.type() == UdpOpcodes.C_ITEM_DROP) {
+                if (ent.hp <= 0) return true;
+                if (content.isReadable(2)) {
+                    int slot = content.readUnsignedByte();
+                    int qty = content.readUnsignedByte(); // Unused for now, drop all
+                    if (slot >= 0 && slot < 5) {
+                        int itemType = ent.inventory[slot];
+                        int baseType = itemType & 0xFF;
+
+                        // Prevent dropping "nothing" (0) or the basic starter pistol (1)
+                        if (baseType != 0 && baseType != 1) {
+                            ServerItem drop = new ServerItem();
+                            drop.entityId = nextItemEntityId++;
+                            drop.itemType = itemType;
+                            drop.x = ent.posX;
+                            drop.y = ent.posY;
+                            groundItems.add(drop);
+                            ent.inventory[slot] = 0; // Clear the slot
+                        }
+                    }
+                }
+                return true;
+            }
+
             final int INPUT_TAIL = 4 * 5 + 2;
             if (!content.isReadable(INPUT_TAIL)) return false;
 
