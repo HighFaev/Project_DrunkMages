@@ -1,5 +1,4 @@
 target/
-docs/
 .mvn/
 .env
 .idea/
@@ -12,3 +11,6 @@ docs/
 .project
 .DS_Store
 Thumbs.db
+*.aux
+*.log
+*.out

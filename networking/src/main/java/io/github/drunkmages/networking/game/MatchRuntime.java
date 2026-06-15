@@ -75,7 +75,7 @@ public final class MatchRuntime {
 
     // ── Match identity ───────────────────────────────────────────────────────
 
-    private final int  matchWireSignedInt;
+    private final int matchWireSignedInt;
     private final long assignedMatchUnsignedLong;
 
     // ── Simulation state ─────────────────────────────────────────────────────
@@ -93,11 +93,11 @@ public final class MatchRuntime {
     /** Random access indexed by entity id. */
     private final PlayerSimState[] byEntityId;
 
-    private final InetAddress[]       tcpGate;
+    private final InetAddress[] tcpGate;
     private final InetSocketAddress[] udpBoundSlot;
 
-    private final HashMap<Integer, Integer>          lastSeqByEntity = new HashMap<>();
-    private final HashMap<Integer, ClientInputPayload> latestInputs  = new HashMap<>();
+    private final HashMap<Integer, Integer> lastSeqByEntity = new HashMap<>();
+    private final HashMap<Integer, ClientInputPayload> latestInputs = new HashMap<>();
 
     private final ZoneManager zone = new ZoneManager();
 
@@ -145,23 +145,23 @@ public final class MatchRuntime {
                 .max()
                 .orElseThrow();
 
-        this.matchWireSignedInt       = matchWireSignedInt;
+        this.matchWireSignedInt = matchWireSignedInt;
         this.assignedMatchUnsignedLong = Integer.toUnsignedLong(matchWireSignedInt);
 
-        byEntityId   = new PlayerSimState[maxEntityId + 1];
+        byEntityId = new PlayerSimState[maxEntityId + 1];
         rosterOrdered = new PlayerSimState[roster.size()];
-        tcpGate      = new InetAddress[maxEntityId + 1];
+        tcpGate = new InetAddress[maxEntityId + 1];
         udpBoundSlot = new InetSocketAddress[maxEntityId + 1];
 
         int ox = 0;
         for (MatchParticipant mp : roster) {
-            int eid   = mp.matchLocalPlayerId();
+            int eid = mp.matchLocalPlayerId();
             InetAddress ipa = Objects.requireNonNull(mp.tcpRemoteIp(), "TCP remote IP");
             PlayerSimState st = new PlayerSimState(eid, mp.spawnX(), mp.spawnY());
             rosterOrdered[ox++] = st;
-            byEntityId[eid]     = st;
-            tcpGate[eid]        = ipa;
-            udpBoundSlot[eid]   = null;
+            byEntityId[eid] = st;
+            tcpGate[eid] = ipa;
+            udpBoundSlot[eid] = null;
         }
 
         for (int i = 0; i < 30; i++) {
